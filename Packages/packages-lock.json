@@ -1,14 +1,5 @@
 {
   "dependencies": {
-    "com.sky-kim.functiongemma-home": {
-      "version": "https://huggingface.co/Sky-Kim/com.sky.sentis.functiongemma.home.git#660adc3ab0b4f1641183e3025efe639705dbda30",
-      "depth": 0,
-      "source": "git",
-      "dependencies": {
-        "com.unity.ai.inference": "2.6.1"
-      },
-      "hash": "660adc3ab0b4f1641183e3025efe639705dbda30"
-    },
     "com.unity.ai.inference": {
       "version": "2.6.1",
       "depth": 0,
