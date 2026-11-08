@@ -191,7 +191,7 @@ namespace NeedleTest
     /// <summary>The smart-home tool registry used by the demo/agent.</summary>
     public static class SmartHomeTools
     {
-        // 16 tools. Rooms apply ONLY to lights; TV / computer / vacuum / speaker are single
+        // 16 model tools + 4 local intents. Rooms apply ONLY to lights; TV / computer / vacuum / speaker are single
         // devices with no room. Room-less device tools tolerate a stray `room` arg (the
         // connector ignores it). Stateless after construction, built once and shared.
         public static ToolCallValidator Validator { get; } = new(new[]
@@ -236,6 +236,16 @@ namespace NeedleTest
             new ToolSpec("get_location"),
             new ToolSpec("web_search",
                 new ToolParamSpec("query", "string", required: true)),
+
+            // Local intents (merged from the voice agent). NOT in FunctionGemma's trained dev block,
+            // so the model never emits them: LocalIntents matches them before generation.
+            new ToolSpec("stop_vacuum",      new ToolParamSpec("room", "string")),
+            new ToolSpec("volume_up",        new ToolParamSpec("room", "string")),
+            new ToolSpec("volume_down",      new ToolParamSpec("room", "string")),
+            new ToolSpec("introduce_self"),
         });
+
+        /// <summary>Relative volume step for volume_up / volume_down.</summary>
+        public const int VolumeStep = 10;
     }
 }

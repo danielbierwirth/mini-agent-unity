@@ -2,9 +2,10 @@
 // a request (refuses, or every call fails the schema gate), escalate to Ollama
 // (OpenAI-compatible endpoint) for a real answer instead of a canned refusal.
 //
-// Uses the local Ollama daemon at localhost:11434, which proxies the cloud model
-// gpt-oss:120b-cloud to ollama.com — auth is handled once by `ollama signin` at the
-// daemon, so no per-request API key is needed. Coroutine + UnityWebRequest.
+// Uses the local Ollama daemon at localhost:11434 with the model configured on HomeAgentConnector:
+// a local model (e.g. qwen3.5:9b), or a cloud model such as gpt-oss:120b-cloud that the daemon proxies
+// to ollama.com (auth once via `ollama signin`; needs usage credits). No per-request API key either way.
+// Coroutine + UnityWebRequest.
 // NOTE: localhost is HTTP, so the player must allow insecure HTTP (PlayerSettings.insecureHttpOption).
 using System;
 using System.Collections;
@@ -43,20 +44,25 @@ namespace NeedleTest
         }
 
         /// <summary>done(answer, elapsedMs). answer starts with "(cloud" on failure.
-        /// endpoint/model configurable by the caller (HomeAgentConnector).</summary>
+        /// endpoint/model configurable by the caller (HomeAgentConnector).
+        /// reasoningEffort: "low" suits gpt-oss (it can't turn thinking off); "none" turns thinking off
+        /// for hybrid models like qwen3.5, which otherwise ignore "low" and spend the whole token budget
+        /// thinking (empty content); null/empty omits the field for models without thinking (qwen2.5
+        /// rejects it with HTTP 400).</summary>
         public static IEnumerator Complete(string system, string user, string endpoint, string model,
-                                           Action<string, long> done)
+                                           Action<string, long> done, string reasoningEffort = "low")
         {
             if (string.IsNullOrEmpty(endpoint)) endpoint = DefaultEndpoint;
             if (string.IsNullOrEmpty(model)) model = DefaultModel;
             var body = "{\"model\":\"" + J(model) + "\",\"messages\":[" +
                        "{\"role\":\"system\",\"content\":\"" + J(system) + "\"}," +
                        "{\"role\":\"user\",\"content\":\"" + J(user) + "\"}]," +
-                       // reasoning_effort: gpt-oss thinks BEFORE answering and its thinking spends
-                       // max_tokens; "low" keeps the answer inside the budget (message.content is
-                       // what we parse — an all-reasoning reply would come back empty). Non-reasoning
-                       // models ignore the field.
-                       "\"temperature\":0.2,\"top_p\":0.95,\"max_tokens\":512,\"reasoning_effort\":\"low\",\"stream\":false}";
+                       // reasoning_effort: thinking spends max_tokens before the answer, and
+                       // message.content is what we parse — an all-reasoning reply comes back empty.
+                       // See reasoningEffort above for the per-model value.
+                       "\"temperature\":0.2,\"top_p\":0.95,\"max_tokens\":512," +
+                       (string.IsNullOrEmpty(reasoningEffort) ? "" : "\"reasoning_effort\":\"" + J(reasoningEffort) + "\",") +
+                       "\"stream\":false}";
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             string answer = null;

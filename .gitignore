@@ -113,3 +113,6 @@ Assets/StreamingAssets/FunctionGemmaHome/
 Assets/StreamingAssets/FunctionGemmaHome.meta
 
 .vscode/
+Assets/StreamingAssets/Models/
+Assets/StreamingAssets/Models.meta
+Assets/StreamingAssets/voiceagent_files.txt*
