@@ -1,8 +1,10 @@
 {
   "dependencies": {
     "com.sky-kim.functiongemma-home": "https://huggingface.co/Sky-Kim/com.sky.sentis.functiongemma.home.git",
+    "com.sky.sentis.gemma3-270m-it": "https://huggingface.co/Sky-Kim/com.sky.sentis.gemma3-270m-it.git",
     "com.sky.sentis.sensevoice": "https://huggingface.co/Sky-Kim/com.sky.sentis.sensevoice.git",
     "com.sky.sentis.silero-vad": "https://huggingface.co/Sky-Kim/com.sky.sentis.silero-vad.git",
+    "com.sky.sentis.supertonic": "https://huggingface.co/Sky-Kim/com.sky.sentis.supertonic.git",
     "com.unity.ai.desktop": "0.4.0-exp.3",
     "com.unity.ai.inference": "2.6.1",
     "com.unity.ai.navigation": "2.0.15",

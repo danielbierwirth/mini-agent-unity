@@ -9673,6 +9673,56 @@ Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: f15281099b8114beea63f4fe063ecdff, type: 3}
   m_PrefabInstance: {fileID: 1883504994}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &1890675102
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1890675104}
+  - component: {fileID: 1890675103}
+  m_Layer: 0
+  m_Name: SceneToggle
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1890675103
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1890675102}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a348f7dc8c8ce4acb8a458e5261bb64b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SceneToggle
+  _targetScene: VoiceAgentDemo
+  _label: Voice Agent
+  _corner: {x: 0, y: 1}
+  _offset: {x: 20, y: -20}
+  _size: {x: 170, y: 56}
+  _color: {r: 0.16, g: 0.17, b: 0.22, a: 0.9}
+--- !u!4 &1890675104
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1890675102}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1911334384
 GameObject:
   m_ObjectHideFlags: 0
@@ -11933,3 +11983,4 @@ SceneRoots:
   - {fileID: 1161976314}
   - {fileID: 1112257795}
   - {fileID: 1954244796}
+  - {fileID: 1890675104}

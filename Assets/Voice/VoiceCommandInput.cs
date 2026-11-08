@@ -1,7 +1,7 @@
 using System.Collections;
-using NeedleTest;                 // VoiceInput, SpeechModelFiles
 using UnityEngine;
 using UnityEngine.UI;
+using VoiceAgent;                 // VoiceInput, ModelRoots (shared with the VoiceAgentDemo scene)
 
 /// <summary>
 /// Voice as a second input to the one home agent. Tap the mic button: Silero VAD + SenseVoice (on-device, see
@@ -48,7 +48,18 @@ public class VoiceCommandInput : MonoBehaviour
     IEnumerator LoadWhenAgentReady()
     {
         while (_connector != null && !_connector.IsReady) yield return null;
-        yield return SpeechModelFiles.CopyOutOfApk();
+        var prepare = ModelRoots.PrepareAsync();   // Android: copies the models out of the APK on first launch
+        while (!prepare.IsCompleted) yield return null;
+        try
+        {
+            prepare.GetAwaiter().GetResult();   // rethrows a failed copy
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[Voice] speech models aren't available, voice input is off: {e.Message}");
+            SetButton("No mic", _disabledColor, false);
+            yield break;
+        }
         try
         {
             m_Voice = new VoiceInput();

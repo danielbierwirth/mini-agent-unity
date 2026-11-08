@@ -9,6 +9,15 @@
       },
       "hash": "b1e0916d9d55830a63bd09887169ae5963f6ccd5"
     },
+    "com.sky.sentis.gemma3-270m-it": {
+      "version": "https://huggingface.co/Sky-Kim/com.sky.sentis.gemma3-270m-it.git",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.ai.inference": "2.6.1"
+      },
+      "hash": "4f60df8e905011d54c5433a55cec09d609e2485d"
+    },
     "com.sky.sentis.sensevoice": {
       "version": "https://huggingface.co/Sky-Kim/com.sky.sentis.sensevoice.git",
       "depth": 0,
@@ -26,6 +35,16 @@
         "com.unity.ai.inference": "2.6.1"
       },
       "hash": "12a0dd19530698a9470981eb10297cebbca7bb68"
+    },
+    "com.sky.sentis.supertonic": {
+      "version": "https://huggingface.co/Sky-Kim/com.sky.sentis.supertonic.git",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.ai.inference": "2.6.1",
+        "com.unity.nuget.newtonsoft-json": "3.2.2"
+      },
+      "hash": "c1e1e7f542964ebf4921363c384b20d749c595bf"
     },
     "com.unity.ai.desktop": {
       "version": "0.4.0-exp.3",
