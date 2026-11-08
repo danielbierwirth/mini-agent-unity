@@ -37,6 +37,9 @@ public class HomeAgentConnector : MonoBehaviour
     [Header("Cloud fallback (OpenAI-compatible chat completions)")]
     [SerializeField] private string _cloudEndpoint = "http://localhost:11434/v1/chat/completions";
     [SerializeField] private string _cloudModel = "gpt-oss:120b-cloud";
+    [Tooltip("reasoning_effort sent with each request: \"low\" for gpt-oss, \"none\" for hybrid thinking models " +
+             "(qwen3.5) so they answer instead of thinking, empty for models without thinking (qwen2.5).")]
+    [SerializeField] private string _cloudReasoningEffort = "low";
 
     // Persona pinned: gpt-oss otherwise introduces itself as "ChatGPT by OpenAI"
     // when asked who it is, which breaks the demo fiction.
@@ -65,6 +68,21 @@ public class HomeAgentConnector : MonoBehaviour
     public bool IsBusy => m_Busy;
 
     public void Submit(string text) { if (_input != null) { _input.text = text; ClampCaret(); } OnSend(); }
+
+    /// <summary>
+    /// Voice entry point: a final speech-to-text transcript runs the exact same turn as typed text. SenseVoice
+    /// returns sentence case with trailing punctuation ("Turn off the kitchen lights."); that is trimmed so the
+    /// model sees what a user would type.
+    /// </summary>
+    public void SubmitTranscript(string transcript)
+    {
+        var text = CleanTranscript(transcript);
+        if (text.Length == 0) return;
+        SessionLog($"VOICE {transcript}");
+        Submit(text);
+    }
+
+    public static string CleanTranscript(string s) => (s ?? "").Trim().TrimEnd('.', '!', '?', '。', '！', '？', ' ').Trim();
 
     // After we assign _input.text programmatically (or keep it after sending), the
     // InputField's cached caret can point past the new text length; the next keystroke
@@ -165,8 +183,12 @@ public class HomeAgentConnector : MonoBehaviour
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
+        // Intents the model was never trained on (stop_vacuum, volume_up/down, introduce_self) are matched
+        // first; their call goes through the same parser + schema gate + executor as a generated one.
         string raw = null;
-        yield return _agent.GenerateCallRoutine(user, r => raw = r);
+        var local = LocalIntents.Match(user);
+        if (local != null) { raw = $"call:{local}{{}}"; SessionLog($"LOCAL {local}"); }
+        else yield return _agent.GenerateCallRoutine(user, r => raw = r);
         long agentMs = sw.ElapsedMilliseconds;
 
         var calls = new List<ParsedCall>();
@@ -203,7 +225,7 @@ public class HomeAgentConnector : MonoBehaviour
             {
                 string ans = null;
                 yield return AgentCloudClient.Complete(CloudSystemPrompt, user, _cloudEndpoint, _cloudModel,
-                                                       (a, ms) => { ans = a; cloudMs = ms; });
+                                                       (a, ms) => { ans = a; cloudMs = ms; }, _cloudReasoningEffort);
                 if (!string.IsNullOrEmpty(ans) && !ans.StartsWith("(cloud")) { usedCloud = true; responses.Add(ans); }
                 else responses.Add("Sorry, I can't handle that request.");
             }
@@ -331,6 +353,31 @@ public class HomeAgentConnector : MonoBehaviour
                 responses.Add("The robot vacuum started cleaning.");
                 break;
             }
+            // ---- local intents (merged from the voice agent; see LocalIntents) ----
+            case "stop_vacuum":
+            {
+                var vacRoom = HomeDeviceController.Room.Bedroom;
+                yield return _home.WalkTo(vacRoom, HomeDeviceController.Device.Vacuum);
+                responses.Add(_home.StopVacuum() ? "The robot vacuum stopped and is heading back to its dock." : "There's no robot vacuum.");
+                break;
+            }
+            case "volume_up":
+            case "volume_down":
+            {
+                var sroom = HomeDeviceController.Room.LivingRoom;
+                int step = call.Name == "volume_up" ? SmartHomeTools.VolumeStep : -SmartHomeTools.VolumeStep;
+                int target = Mathf.Clamp(_home.GetVolume(sroom) + step, 0, 100);
+                yield return _home.WalkTo(sroom, HomeDeviceController.Device.Speaker);
+                responses.Add(_home.SetVolume(sroom, target)
+                    ? $"Volume {(step > 0 ? "up" : "down")} to {target}%."
+                    : "There's no speaker.");
+                break;
+            }
+            case "introduce_self":
+                responses.Add("I'm Tiger, the smart-home assistant of this house. I can switch the lights in the kitchen, " +
+                              "living room and bedroom, the TV, the computer and the robot vacuum, play music and change " +
+                              "the volume, and tell you the weather, the time or look things up.");
+                break;
             case "get_weather":
             {
                 var fsw = System.Diagnostics.Stopwatch.StartNew(); string wx = null;
@@ -378,7 +425,7 @@ public class HomeAgentConnector : MonoBehaviour
                         ? $"Question: {query}\n\n(No search results were found.)"
                         : $"Question: {query}\n\nWeb search results:\n{context}";
                     var lsw = System.Diagnostics.Stopwatch.StartNew(); string ans = null;
-                    yield return AgentCloudClient.Complete(sys, prompt, _cloudEndpoint, _cloudModel, (a, _) => ans = a);
+                    yield return AgentCloudClient.Complete(sys, prompt, _cloudEndpoint, _cloudModel, (a, _) => ans = a, _cloudReasoningEffort);
                     lsw.Stop(); m_NetSegs.Add($"cloud_llm {lsw.ElapsedMilliseconds}ms");
                     if (!string.IsNullOrEmpty(ans) && !ans.StartsWith("(cloud")) answer = ans;
                 }

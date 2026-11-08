@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 
 /// <summary>
 /// Drives a scripted list of commands through <see cref="HomeAgentConnector"/>, one at
@@ -9,6 +10,9 @@ using UnityEngine;
 /// starts it waits <see cref="_startDelay"/> seconds, then submits each command, waiting
 /// <see cref="_interval"/> seconds between them (and for the agent to finish each turn).
 /// The agent logs every turn (incl. the harvest log), so progress is visible there.
+///
+/// With <see cref="_toggleButton"/> assigned, the button starts the list and stops it mid-run (the turn already
+/// running finishes; no further commands are submitted).
 /// </summary>
 public class MiniAgentTestRunner : MonoBehaviour
 {
@@ -23,6 +27,9 @@ public class MiniAgentTestRunner : MonoBehaviour
 
     [Tooltip("Run the command list automatically when the scene starts.")]
     [SerializeField] private bool _autoRun = true;
+
+    [Tooltip("Optional button that starts / stops the command list.")]
+    [SerializeField] private Button _toggleButton;
 
     [Header("Commands (run in order, top to bottom)")]
     [SerializeField]
@@ -42,13 +49,54 @@ public class MiniAgentTestRunner : MonoBehaviour
         "오늘 기분 어때?"
     };
 
-    private IEnumerator Start()
-    {
-        if (!_autoRun) yield break;
+    Coroutine m_Run;
+    Text m_Label;
+    string m_IdleLabel;           // the button's own label from the scene, shown while stopped
 
-        // Wait the fixed delay from scene start, then make sure the agent finished warmup
+    public bool IsRunning => m_Run != null;
+
+    private void Start()
+    {
+        if (_toggleButton != null)
+        {
+            _toggleButton.onClick.AddListener(Toggle);
+            m_Label = _toggleButton.GetComponentInChildren<Text>();
+            if (m_Label != null) m_IdleLabel = m_Label.text;
+            var image = _toggleButton.GetComponent<Image>();
+            if (image != null) { image.sprite = UiRuntimeAssets.RoundedSprite(16f); image.type = Image.Type.Sliced; }
+        }
+        if (_autoRun) StartRun(_startDelay);
+        else UpdateLabel();
+    }
+
+    /// <summary>Start the command list if it isn't running, otherwise stop it.</summary>
+    public void Toggle()
+    {
+        if (IsRunning) StopRun();
+        else StartRun(0f);
+    }
+
+    public void StartRun(float delay)
+    {
+        if (IsRunning) return;
+        m_Run = StartCoroutine(RunWhenReady(delay));
+        UpdateLabel();
+    }
+
+    public void StopRun()
+    {
+        if (!IsRunning) return;
+        StopCoroutine(m_Run);
+        m_Run = null;
+        Debug.Log("[TESTRUNNER] STOPPED");
+        UpdateLabel();
+    }
+
+    IEnumerator RunWhenReady(float delay)
+    {
+        // Wait the delay, then make sure the agent finished warmup
         // (submitting before it is ready would be ignored).
-        yield return new WaitForSeconds(_startDelay);
+        if (delay > 0f) yield return new WaitForSeconds(delay);
 
         var conn = FindAnyObjectByType<HomeAgentConnector>();
         while (conn == null || !conn.IsReady)
@@ -58,6 +106,13 @@ public class MiniAgentTestRunner : MonoBehaviour
         }
 
         yield return Run(conn);
+        m_Run = null;
+        UpdateLabel();
+    }
+
+    void UpdateLabel()
+    {
+        if (m_Label != null) m_Label.text = IsRunning ? "Stop" : m_IdleLabel;
     }
 
     /// <summary>Submit every command in order.</summary>

@@ -181,6 +181,13 @@ public class HomeDeviceController : MonoBehaviour
         return true;
     }
 
+    /// <summary>Pure read: whether a room's light is on (false before any light command).</summary>
+    public bool IsLightOn(Room room)
+    {
+        var lamp = _rooms[room].light;
+        return lamp != null && _lightState.TryGetValue(lamp, out var st) && st.on;
+    }
+
     // ---------------- screens (TV / computer) ----------------
 
     public bool SetTv(Room room, bool on)
@@ -239,6 +246,24 @@ public class HomeDeviceController : MonoBehaviour
         if (_vacuumCo != null) StopCoroutine(_vacuumCo);
         _vacuumCo = StartCoroutine(VacuumPatrol());
         return true;
+    }
+
+    public bool IsVacuuming => _vacuumCo != null;
+
+    /// <summary>Stop the robot vacuum mid-patrol and send it straight back to its dock.</summary>
+    public bool StopVacuum()
+    {
+        if (_robotCleaner == null) return false;
+        if (_vacuumCo != null) StopCoroutine(_vacuumCo);
+        _vacuumCo = StartCoroutine(ReturnToDock());
+        return true;
+    }
+
+    private IEnumerator ReturnToDock()
+    {
+        yield return VacuumDrive(_robotCleaner, _vacuumDock);
+        _robotCleaner.position = _vacuumDock;
+        _vacuumCo = null;
     }
 
     private IEnumerator VacuumPatrol()
