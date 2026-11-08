@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -50,7 +51,7 @@ public class MiniAgentTestRunner : MonoBehaviour
     };
 
     Coroutine m_Run;
-    Text m_Label;
+    TMP_Text m_Label;
     string m_IdleLabel;           // the button's own label from the scene, shown while stopped
 
     public bool IsRunning => m_Run != null;
@@ -60,7 +61,7 @@ public class MiniAgentTestRunner : MonoBehaviour
         if (_toggleButton != null)
         {
             _toggleButton.onClick.AddListener(Toggle);
-            m_Label = _toggleButton.GetComponentInChildren<Text>();
+            m_Label = _toggleButton.GetComponentInChildren<TMP_Text>();
             if (m_Label != null) m_IdleLabel = m_Label.text;
             var image = _toggleButton.GetComponent<Image>();
             if (image != null) { image.sprite = UiRuntimeAssets.RoundedSprite(16f); image.type = Image.Type.Sliced; }

@@ -62,7 +62,7 @@ namespace VoiceAgent.Info
         public static bool Supports(string commandId) => commandId is "get_weather" or "get_location" or "get_time" or CommandCatalog.WebSearch;
 
         /// <summary>The placeholder bubble shown while an answer is being fetched.</summary>
-        public static string LookingUp(Lang lang) => lang == Lang.Ko ? "찾아보는 중…" : "Looking it up…";
+        public static string LookingUp(Lang lang) => AppLanguage.Pick(lang, "Looking it up…", "찾아보는 중…", "أبحث عن ذلك…");
 
         /// <summary>The timing panel's action label for an answer from <see cref="AnswerAsync"/>.</summary>
         public static string ActionLabel(string commandId, string sources) => commandId switch
@@ -105,17 +105,18 @@ namespace VoiceAgent.Info
                 Step($"failed: {e.Message}");
             }
             if (!answer.Found && string.IsNullOrEmpty(answer.Speech) && commandId != CommandCatalog.WebSearch)
-                answer.Speech = lang == Lang.Ko ? "인터넷에서 정보를 가져오지 못했어요. 연결을 확인해 주세요." : "I couldn't reach the internet for that. Please check the connection.";
+                answer.Speech = AppLanguage.Pick(lang, "I couldn't reach the internet for that. Please check the connection.",
+                    "인터넷에서 정보를 가져오지 못했어요. 연결을 확인해 주세요.", "لم أتمكن من الوصول إلى الإنترنت. يرجى التحقق من الاتصال.");
             answer.Ms = clock.Elapsed.TotalMilliseconds;
             return answer;
         }
 
         async Awaitable Weather(string text, Lang lang, InfoAnswer answer, Action<string> step, CancellationToken cancel)
         {
-            step(lang == Lang.Ko ? "위치 확인 중…" : "Finding the place…");
+            step(AppLanguage.Pick(lang, "Finding the place…", "위치 확인 중…", "أحدد المكان…"));
             var place = await m_Geo.PlaceInTextAsync(text, lang, cancel) ?? await m_Geo.IpPlaceAsync(lang, cancel);
             if (place == null) return;
-            step(lang == Lang.Ko ? $"{place.Name} 날씨 가져오는 중…" : $"Fetching weather for {place.Name}…");
+            step(AppLanguage.Pick(lang, $"Fetching weather for {place.Name}…", $"{place.Name} 날씨 가져오는 중…", $"أجلب طقس {place.Name}…"));
             var forecast = await m_Geo.ForecastAsync(place, cancel);
             if (forecast == null) return;
             answer.Speech = GeoWeather.WeatherReply(place, forecast, GeoWeather.DayOffset(text), lang);
@@ -127,7 +128,7 @@ namespace VoiceAgent.Info
         {
             var place = await m_Geo.PlaceInTextAsync(text, lang, cancel);
             if (place == null) return false;
-            step(lang == Lang.Ko ? $"{place.Name} 시간대 확인 중…" : $"Looking up the time zone of {place.Name}…");
+            step(AppLanguage.Pick(lang, $"Looking up the time zone of {place.Name}…", $"{place.Name} 시간대 확인 중…", $"أبحث عن المنطقة الزمنية لـ {place.Name}…"));
             var forecast = await m_Geo.ForecastAsync(place, cancel);
             if (forecast == null) return false;
             answer.Speech = GeoWeather.TimeReply(place, forecast.UtcOffsetSeconds, DateTime.UtcNow, lang);
@@ -138,7 +139,7 @@ namespace VoiceAgent.Info
 
         async Awaitable Location(Lang lang, InfoAnswer answer, Action<string> step, CancellationToken cancel)
         {
-            step(lang == Lang.Ko ? "IP로 위치 확인 중…" : "Locating by IP…");
+            step(AppLanguage.Pick(lang, "Locating by IP…", "IP로 위치 확인 중…", "أحدد الموقع عبر IP…"));
             var place = await m_Geo.IpPlaceAsync(lang, cancel);
             if (place == null) return;
             answer.Speech = GeoWeather.LocationReply(place, lang);
@@ -150,12 +151,15 @@ namespace VoiceAgent.Info
         {
             var query = InfoText.SearchQuery(text);
             var news = InfoText.IsNewsQuestion(text);
-            var sourceNames = news ? (lang == Lang.Ko ? "Google 뉴스 / Bing 뉴스" : "Google News / Bing News") : lang == Lang.Ko ? "위키백과" : "Wikipedia / DuckDuckGo / Bing";
-            step(lang == Lang.Ko ? $"'{query}' {(news ? "뉴스 찾는" : "검색")} 중… ({sourceNames})" : $"Searching '{query}'… ({sourceNames})");
+            var sourceNames = news ? AppLanguage.Pick(lang, "Google News / Bing News", "Google 뉴스 / Bing 뉴스", "Google News / Bing News")
+                : AppLanguage.Pick(lang, "Wikipedia / DuckDuckGo / Bing", "위키백과", "ويكيبيديا");
+            step(AppLanguage.Pick(lang, $"Searching '{query}'… ({sourceNames})", $"'{query}' {(news ? "뉴스 찾는" : "검색")} 중… ({sourceNames})",
+                $"أبحث عن '{query}'… ({sourceNames})"));
 
             // Property questions ("capital of …", "when was … born") get a structured answer from Wikidata first. The text
             // sources only run when it has none, which keeps Wikipedia's small anonymous request budget for them.
-            var fact = news ? null : Wikidata.Parse(text);
+            // Wikidata's question patterns and answer sentences are English and Korean; Arabic goes to the text sources.
+            var fact = news || lang == Lang.Ar ? null : Wikidata.Parse(text);
             if (fact != null)
             {
                 answer.Steps.Add($"wikidata: {fact}");
@@ -207,7 +211,8 @@ namespace VoiceAgent.Info
                 if (words.Count > 0 && query.Contains(' '))
                     foreach (var word in words)
                     {
-                        step(lang == Lang.Ko ? $"'{query}' 문서가 없어 '{word}'(으)로 다시 찾는 중…" : $"No article for '{query}'; trying '{word}'…");
+                        step(AppLanguage.Pick(lang, $"No article for '{query}'; trying '{word}'…", $"'{query}' 문서가 없어 '{word}'(으)로 다시 찾는 중…",
+                            $"لا توجد مقالة عن '{query}'؛ أجرب '{word}'…"));
                         var retry = await Safe(() => SearchSources.WikipediaAsync(m_Web, word, lang, 2, cancel), "wikipedia-retry", step);
                         answer.Steps.Add($"retry '{word}': {retry.Count}");
                         if (retry.Count == 0) continue;
@@ -224,7 +229,7 @@ namespace VoiceAgent.Info
             }
             if (passages.Count == 0) return;
 
-            step(lang == Lang.Ko ? $"자료 {passages.Count}개에서 답 고르는 중…" : $"Ranking {passages.Count} results…");
+            step(AppLanguage.Pick(lang, $"Ranking {passages.Count} results…", $"자료 {passages.Count}개에서 답 고르는 중…", $"أرتب {passages.Count} نتيجة…"));
             var expect = PassageRanker.Expect(text);
             var ranked = m_Ranker.Rank(text, query, passages);
             foreach (var c in ranked.Take(3)) answer.Steps.Add("rank: " + c);
@@ -235,7 +240,7 @@ namespace VoiceAgent.Info
                 var english = passages.FirstOrDefault(p => !string.IsNullOrEmpty(p.EnglishTitle))?.EnglishTitle;
                 if (english != null)
                 {
-                    step(lang == Lang.Ko ? $"영어 위키백과 '{english}' 확인 중…" : $"Checking '{english}'…");
+                    step(AppLanguage.Pick(lang, $"Checking '{english}'…", $"영어 위키백과 '{english}' 확인 중…", $"أتحقق من '{english}'…"));
                     var more = await Safe(() => SearchSources.WikipediaIntroAsync(m_Web, english, Lang.En, cancel), "wikipedia-en", step);
                     var rankedEn = m_Ranker.Rank(english + " " + text, english, more, expect);
                     answer.Steps.Add($"cross-lingual: {more.Count} passages, best {(rankedEn.Count > 0 ? rankedEn[0].ToString() : "none")}");
@@ -276,8 +281,8 @@ namespace VoiceAgent.Info
                     headlines.Add(c);
             if (headlines.Count == 0) return;
             var lines = headlines.Select(h => InfoText.Speakable(h.Sentence).TrimEnd('.', ' ')).ToList();
-            answer.Speech = lang == Lang.Ko ? $"{query} 최근 소식이에요: {lines[0]}." : $"Here's the latest on {query}: {lines[0]}.";
-            if (lines.Count > 1) answer.Speech += lang == Lang.Ko ? $" 또, {lines[1]}." : $" Also, {lines[1]}.";
+            answer.Speech = AppLanguage.Pick(lang, $"Here's the latest on {query}: {lines[0]}.", $"{query} 최근 소식이에요: {lines[0]}.", $"آخر الأخبار عن {query}: {lines[0]}.");
+            if (lines.Count > 1) answer.Speech += AppLanguage.Pick(lang, $" Also, {lines[1]}.", $" 또, {lines[1]}.", $" وأيضًا، {lines[1]}.");
             answer.Sources = string.Join(" / ", headlines.Select(h => h.Passage.Source + (h.Passage.Date != null ? $" {h.Passage.Date[5..]}" : string.Empty)).Distinct());
         }
 

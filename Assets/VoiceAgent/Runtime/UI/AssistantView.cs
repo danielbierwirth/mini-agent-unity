@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -13,13 +14,13 @@ namespace VoiceAgent.UI
     /// </summary>
     public sealed class AssistantView : MonoBehaviour
     {
-        [SerializeField] Text m_Status, m_OrbLabel;
+        [SerializeField] TMP_Text m_Status, m_OrbLabel;
         [SerializeField] RectTransform m_Content, m_Log;
         [SerializeField] ScrollRect m_Scroll;
         [Tooltip("Suggestion panel rows, top to bottom; the most likely command fills the first.")]
         [SerializeField] ChipView[] m_Chips;
         [SerializeField] GameObject m_ChipsHint;
-        [SerializeField] InputField m_Input;
+        [SerializeField] TMP_InputField m_Input;
         [SerializeField] Image m_OrbRing;
         [SerializeField] Button m_OrbButton;
         [SerializeField] MessageView m_UserTemplate, m_AssistantTemplate;

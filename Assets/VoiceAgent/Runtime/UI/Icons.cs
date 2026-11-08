@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -13,7 +14,7 @@ namespace VoiceAgent.UI
         public static Sprite Get(string name) => string.IsNullOrEmpty(name) ? null : Resources.Load<Sprite>($"Icons/{name}");
 
         /// <summary>Shows <paramref name="sprite"/> in the glyph, or the letter when it is null.</summary>
-        public static void Show(Image glyph, Text letter, Sprite sprite, string fallback)
+        public static void Show(Image glyph, TMP_Text letter, Sprite sprite, string fallback)
         {
             glyph.sprite = sprite;
             glyph.enabled = sprite != null;

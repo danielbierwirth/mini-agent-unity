@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -9,7 +10,7 @@ namespace VoiceAgent.UI
         static readonly Color Off = new(0.105f, 0.125f, 0.165f), IconOff = new(0.17f, 0.195f, 0.24f);
 
         [SerializeField] Image m_Background, m_Icon;
-        [SerializeField] Text m_State;
+        [SerializeField] TMP_Text m_State;
 
         public Image Icon => m_Icon;
 

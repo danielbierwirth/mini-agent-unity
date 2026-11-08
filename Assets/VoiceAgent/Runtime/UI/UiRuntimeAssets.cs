@@ -2,8 +2,8 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Small runtime-built UI assets shared by the agent UI (speech bubble, chat bar):
-/// a rounded-rect 9-slice sprite and a Korean-capable OS font lookup.
+/// Small runtime-built UI assets shared by the agent UI (speech bubble, chat bar, scene and language toggles):
+/// a rounded-rect 9-slice sprite. (Fonts come from the TMP font asset stack in Assets/Fonts.)
 /// </summary>
 public static class UiRuntimeAssets
 {
@@ -33,23 +33,5 @@ public static class UiRuntimeAssets
                                    0, SpriteMeshType.FullRect, new Vector4(r, r, r, r));  // 9-slice border
         s_Rounded[r] = sprite;
         return sprite;
-    }
-
-    /// <summary>
-    /// First available Korean-capable OS font, or null if none is installed —
-    /// callers decide whether to fall back to the built-in font or keep the authored one.
-    /// </summary>
-    public static Font KoreanOsFont(int size)
-    {
-        foreach (var n in new[] { "Apple SD Gothic Neo", "AppleGothic", "Malgun Gothic" })
-        {
-            try
-            {
-                var f = Font.CreateDynamicFontFromOSFont(n, size);
-                if (f != null) return f;
-            }
-            catch { }
-        }
-        return null;
     }
 }

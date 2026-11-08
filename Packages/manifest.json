@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.nosuchstudio.rtltmpro": "https://github.com/hk1ll3r/RTLTMPro.git?path=/UPMPackage",
     "com.sky-kim.functiongemma-home": "https://huggingface.co/Sky-Kim/com.sky.sentis.functiongemma.home.git",
     "com.sky.sentis.gemma3-270m-it": "https://huggingface.co/Sky-Kim/com.sky.sentis.gemma3-270m-it.git",
     "com.sky.sentis.sensevoice": "https://huggingface.co/Sky-Kim/com.sky.sentis.sensevoice.git",

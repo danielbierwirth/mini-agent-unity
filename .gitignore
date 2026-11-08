@@ -116,3 +116,7 @@ Assets/StreamingAssets/FunctionGemmaHome.meta
 Assets/StreamingAssets/Models/
 Assets/StreamingAssets/Models.meta
 Assets/StreamingAssets/voiceagent_files.txt*
+
+# Whisper for Arabic speech-to-text (base by default, ~194 MB): VoiceAgent > Speech > Download Whisper ... writes it
+/[Aa]ssets/StreamingAssets/Whisper/
+/[Aa]ssets/StreamingAssets/Whisper.meta

@@ -23,7 +23,7 @@ namespace VoiceAgent.Info
             "can you tell me about", "tell me about", "what do you know about", "search for", "search", "look up", "who was", "who is", "who are",
             "what was", "what is", "what's", "what are", "define", "explain",
         };
-        static readonly string[] s_NewsWords = { "최근", "요즘", "뉴스", "소식", "새로운", "최신", "오늘의", "latest", "recent", "news", "headlines", "any new" };
+        static readonly string[] s_NewsWords = { "최근", "요즘", "뉴스", "소식", "새로운", "최신", "오늘의", "latest", "recent", "news", "headlines", "any new", "أخبار", "اخبار", "الأخبار" };
         // "the latest" before "latest", so the longer phrase goes as a whole.
         static readonly string[] s_EnQueryFiller = { "please", "for me", "the latest", "latest", "recent", "news", "about", "any" };
         static readonly string[] s_Articles = { "the", "a", "an" };
@@ -118,6 +118,7 @@ namespace VoiceAgent.Info
         public static string SearchQuery(string text)
         {
             var q = TextScan.ReplaceRuns(text ?? string.Empty, TextScan.Punctuation, " ").Trim();
+            if (LangDetect.Of(q) == Lang.Ar) return ArabicCommands.SearchTopic(q);
             if (LangDetect.Of(q) == Lang.Ko)
             {
                 for (var changed = true; changed;)

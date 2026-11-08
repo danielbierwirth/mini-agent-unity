@@ -36,8 +36,8 @@ namespace VoiceAgent.Info
         [Serializable] sealed class WikiLangLink { public string lang, title; }
         [Serializable] sealed class DdgAnswer { public string Heading, AbstractText, AbstractSource, AbstractURL, Answer; }
 
-        static string WikiHost(Lang lang) => lang == Lang.Ko ? "ko.wikipedia.org" : "en.wikipedia.org";
-        static string Market(Lang lang) => lang == Lang.Ko ? "setlang=ko&cc=KR" : "setlang=en-US&cc=US";
+        static string WikiHost(Lang lang) => AppLanguage.Pick(lang, "en.wikipedia.org", "ko.wikipedia.org", "ar.wikipedia.org");
+        static string Market(Lang lang) => AppLanguage.Pick(lang, "setlang=en-US&cc=US", "setlang=ko&cc=KR", "setlang=ar&cc=SA");
 
         /// <summary>
         /// Full lead sections (several paragraphs, plain text) of the best matching articles in one request, with the
@@ -66,7 +66,7 @@ namespace VoiceAgent.Info
                 .Select(p => new Passage
                 {
                     Kind = PassageKind.Wiki,
-                    Source = lang == Lang.Ko ? "위키백과" : "Wikipedia",
+                    Source = AppLanguage.Pick(lang, "Wikipedia", "위키백과", "ويكيبيديا"),
                     Title = p.title,
                     Text = JoinLines(p.extract.Trim()),
                     Url = $"https://{WikiHost(lang)}/wiki/{Uri.EscapeDataString(p.title.Replace(' ', '_'))}",
@@ -115,7 +115,7 @@ namespace VoiceAgent.Info
 
         public static async Awaitable<List<Passage>> GoogleNewsAsync(IWebClient web, string query, Lang lang, int count, CancellationToken cancel) =>
             ParseRss(await web.GetAsync($"https://news.google.com/rss/search?q={Uri.EscapeDataString(query)}&" +
-                                        (lang == Lang.Ko ? "hl=ko&gl=KR&ceid=KR:ko" : "hl=en-US&gl=US&ceid=US:en"), cancel), PassageKind.News).Take(count).ToList();
+                                        AppLanguage.Pick(lang, "hl=en-US&gl=US&ceid=US:en", "hl=ko&gl=KR&ceid=KR:ko", "hl=ar&gl=EG&ceid=EG:ar"), cancel), PassageKind.News).Take(count).ToList();
 
         public static async Awaitable<List<Passage>> BingNewsAsync(IWebClient web, string query, Lang lang, int count, CancellationToken cancel) =>
             ParseRss(await web.GetAsync($"https://www.bing.com/news/search?q={Uri.EscapeDataString(query)}&format=RSS&{Market(lang)}", cancel), PassageKind.News).Take(count).ToList();

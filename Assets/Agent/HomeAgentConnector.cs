@@ -4,9 +4,11 @@ using System.IO;
 using System.Text;
 using NeedleTest;                 // FgCallParser, ToolCallValidator, SmartHomeTools, AgentInfoApis, AgentCloudClient
 using SentisSkills.Inference;     // FunctionGemmaGenerator
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using VoiceAgent;                 // AppLanguage, ArabicCommands
 
 /// <summary>
 /// Model → scene connector. Turns a natural-language command into on-device tool
@@ -17,6 +19,10 @@ using UnityEngine.UI;
 ///
 /// This is the ONLY layer that knows about the model. Swapping the .onnx and dev
 /// block on the generator leaves this connector unchanged.
+///
+/// Language: replies follow the selected <see cref="AppLanguage"/> (EN / KR / AR, <see cref="AgentReplies"/>). The
+/// model was trained on English and Korean only, so an Arabic command is first rewritten to the English command it
+/// means (<see cref="ArabicCommands"/>); tool names, arguments and device IDs stay English.
 /// </summary>
 public class HomeAgentConnector : MonoBehaviour
 {
@@ -25,9 +31,9 @@ public class HomeAgentConnector : MonoBehaviour
     [SerializeField] private HomeDeviceController _home;
 
     [Header("UI")]
-    [SerializeField] private InputField _input;
+    [SerializeField] private TMP_InputField _input;
     [SerializeField] private Button _sendButton;
-    [SerializeField] private Text _status;                 // bottom-left status
+    [SerializeField] private TMP_Text _status;             // bottom-left status
     // response shows in the speech bubble above Tiger's head.
     [SerializeField] private TigerSpeechBubble _bubble;
 
@@ -43,10 +49,10 @@ public class HomeAgentConnector : MonoBehaviour
 
     // Persona pinned: gpt-oss otherwise introduces itself as "ChatGPT by OpenAI"
     // when asked who it is, which breaks the demo fiction.
-    const string CloudSystemPrompt =
+    // The reply language is the selected one (AgentReplies.ReplyLanguageRule), not the user's.
+    static string CloudSystemPrompt =>
         "You are Tiger, the friendly smart-home assistant tiger of this house. " +
-        "Answer concisely and accurately, ALWAYS in the same language the user used " +
-        "(Korean question -> Korean answer, English -> English). Never mention OpenAI, " +
+        "Answer concisely and accurately. " + AgentReplies.ReplyLanguageRule + " Never mention OpenAI, " +
         "ChatGPT, or what model you run on — you are simply Tiger. You CANNOT operate " +
         "devices yourself: if asked to control something (windows, aircon, volume, doors...), " +
         "say you can't do that here — NEVER claim you did it. One or two sentences.";
@@ -84,9 +90,8 @@ public class HomeAgentConnector : MonoBehaviour
 
     public static string CleanTranscript(string s) => (s ?? "").Trim().TrimEnd('.', '!', '?', '。', '！', '？', ' ').Trim();
 
-    // After we assign _input.text programmatically (or keep it after sending), the
-    // InputField's cached caret can point past the new text length; the next keystroke
-    // then throws in InputField.Append (Substring out of range). Keep the caret valid.
+    // After we assign _input.text programmatically (or keep it after sending), keep the
+    // caret and selection at the end of the new text so the next keystroke appends.
     void ClampCaret()
     {
         if (_input == null) return;
@@ -94,16 +99,6 @@ public class HomeAgentConnector : MonoBehaviour
         _input.caretPosition = end;
         _input.selectionAnchorPosition = end;
         _input.selectionFocusPosition = end;
-    }
-
-    Font m_Font;
-
-    void Awake()
-    {
-        // no OS Korean font -> keep the authored fonts (don't downgrade to the built-in)
-        m_Font = UiRuntimeAssets.KoreanOsFont(24);
-        if (m_Font != null)
-            foreach (var t in FindObjectsByType<Text>(FindObjectsInactive.Exclude)) t.font = m_Font;
     }
 
     void Start()
@@ -118,6 +113,7 @@ public class HomeAgentConnector : MonoBehaviour
         if (_input != null) _input.onSubmit.AddListener(_ => OnSend());
         SetStatus("Loading model...");
         StyleUI();
+        AppLanguage.Changed += OnLanguageChanged;
         SessionLog($"===== session start {System.DateTime.Now:yyyy-MM-dd HH:mm:ss} =====");
         StartCoroutine(Warmup());
     }
@@ -130,7 +126,7 @@ public class HomeAgentConnector : MonoBehaviour
         sw.Stop();
         m_Ready = true;
         SetStatus($"Warmup {sw.ElapsedMilliseconds}ms");
-        ShowResponse("Hi, there!", 4f);
+        ShowResponse(AgentReplies.Greeting, 4f);
     }
 
     void OnSend()
@@ -185,10 +181,16 @@ public class HomeAgentConnector : MonoBehaviour
 
         // Intents the model was never trained on (stop_vacuum, volume_up/down, introduce_self) are matched
         // first; their call goes through the same parser + schema gate + executor as a generated one.
+        // Arabic → the English command the model was trained on ("أطفئ أضواء المطبخ" → "turn off the kitchen light").
+        string modelText = ArabicCommands.ForModel(user);
+        if (modelText != user) SessionLog($"AR→EN {modelText}");
         string raw = null;
-        var local = LocalIntents.Match(user);
-        if (local != null) { raw = $"call:{local}{{}}"; SessionLog($"LOCAL {local}"); }
-        else yield return _agent.GenerateCallRoutine(user, r => raw = r);
+        // Arabic the rewrite can't read is conversation: the model never saw Arabic and would invent calls for it.
+        bool arabicChat = modelText == user && ArabicText.ContainsArabic(user);
+        var local = arabicChat ? null : LocalIntents.Match(modelText);
+        if (arabicChat) SessionLog("AR    no command, chat");
+        else if (local != null) { raw = $"call:{local}{{}}"; SessionLog($"LOCAL {local}"); }
+        else yield return _agent.GenerateCallRoutine(modelText, r => raw = r);
         long agentMs = sw.ElapsedMilliseconds;
 
         var calls = new List<ParsedCall>();
@@ -198,6 +200,8 @@ public class HomeAgentConnector : MonoBehaviour
             var res = m_Validator.Validate(pc);
             if (res.Ok) calls.Add(pc); else rejected.Add(res.Reason);
         }
+
+        if (modelText != user) PinRewrittenCity(calls, modelText);
 
         // Reflect the tool call in the status UI IMMEDIATELY after generation — before
         // Tiger walks over and the device acts — so the feedback isn't delayed by the walk.
@@ -227,9 +231,9 @@ public class HomeAgentConnector : MonoBehaviour
                 yield return AgentCloudClient.Complete(CloudSystemPrompt, user, _cloudEndpoint, _cloudModel,
                                                        (a, ms) => { ans = a; cloudMs = ms; }, _cloudReasoningEffort);
                 if (!string.IsNullOrEmpty(ans) && !ans.StartsWith("(cloud")) { usedCloud = true; responses.Add(ans); }
-                else responses.Add("Sorry, I can't handle that request.");
+                else responses.Add(AgentReplies.CantHandle);
             }
-            else responses.Add("Sorry, I can't handle that request.");
+            else responses.Add(AgentReplies.CantHandle);
         }
 
         sw.Stop();
@@ -247,6 +251,27 @@ public class HomeAgentConnector : MonoBehaviour
         else if (calls.Count == 0) SetStatus($"no tool {agentMs}ms");
     }
 
+    // An Arabic turn's rewrite names the city in English ("what's the weather in Dubai"). FunctionGemma can't copy a
+    // city it never saw in training ("Dubai" → "dubli", in English too), so for Arabic turns the rewrite's city wins
+    // whenever the model's city isn't in the sentence. English and Korean turns keep the model's argument.
+    static void PinRewrittenCity(List<ParsedCall> calls, string modelText)
+    {
+        var at = modelText.IndexOf(" in ", System.StringComparison.Ordinal);
+        if (at < 0) return;
+        var city = modelText[(at + 4)..].Replace(" the day after tomorrow", "").Replace(" tomorrow", "").Trim();
+        if (city.Length == 0) return;
+        foreach (var call in calls)
+        {
+            if (call.Name != "get_weather" && call.Name != "get_time") continue;
+            for (int i = 0; i < call.Args.Count; i++)
+                if (call.Args[i].Key == "city" && modelText.IndexOf(call.Args[i].Value ?? "", System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    SessionLog($"CITY  {call.Args[i].Value} → {city} (from the Arabic rewrite)");
+                    call.Args[i] = new KeyValuePair<string, string>("city", city);
+                }
+        }
+    }
+
     // Compact "name{val1,val2}" for the status line, e.g. turn_on_tv{거실}, set_volume{거실,30}.
     static string FormatCall(ParsedCall c)
     {
@@ -260,7 +285,7 @@ public class HomeAgentConnector : MonoBehaviour
         string roomStr = Arg(call, "room");
         HomeDeviceController.Room room = default;
         bool haveRoom = _home != null && roomStr != null && _home.TryResolveRoom(roomStr, out room);
-        string rn = haveRoom ? HomeDeviceController.RoomName(room) : roomStr;
+        string rn = haveRoom ? AgentReplies.Room(room) : roomStr;
 
         switch (call.Name)
         {
@@ -271,20 +296,20 @@ public class HomeAgentConnector : MonoBehaviour
                 int? bi = b != null && int.TryParse(b, out var bv) ? bv : (int?)null;
                 yield return _home.WalkTo(room);
                 _home.SetLight(room, true, bi);
-                responses.Add(bi.HasValue ? $"Turned on the {rn} light at {bi}% brightness." : $"Turned on the {rn} light.");
+                responses.Add(AgentReplies.LightOn(rn, bi));
                 break;
             }
             case "turn_off_light":
                 if (!haveRoom) { responses.Add(NoRoom(roomStr)); break; }
                 yield return _home.WalkTo(room); _home.SetLight(room, false);
-                responses.Add($"Turned off the {rn} light.");
+                responses.Add(AgentReplies.LightOff(rn));
                 break;
             case "set_light_color":
             {
                 if (!haveRoom) { responses.Add(NoRoom(roomStr)); break; }
                 var col = Arg(call, "color");
                 yield return _home.WalkTo(room); _home.SetLightColor(room, col);
-                responses.Add($"Changed the {rn} light to {col}.");
+                responses.Add(AgentReplies.LightColor(rn, col));
                 break;
             }
             // TV is a single device (lives in the Living Room) — no room arg.
@@ -295,7 +320,7 @@ public class HomeAgentConnector : MonoBehaviour
                 var tvRoom = HomeDeviceController.Room.LivingRoom;
                 yield return _home.WalkTo(tvRoom, HomeDeviceController.Device.Tv);
                 _home.SetTv(tvRoom, on);
-                responses.Add($"Turned {(on ? "on" : "off")} the TV.");
+                responses.Add(AgentReplies.Tv(on));
                 break;
             }
             // Computer is a single device (lives in the Bedroom) — no room arg.
@@ -306,7 +331,7 @@ public class HomeAgentConnector : MonoBehaviour
                 var pcRoom = HomeDeviceController.Room.Bedroom;
                 yield return _home.WalkTo(pcRoom, HomeDeviceController.Device.Computer);
                 _home.SetComputer(pcRoom, on);
-                responses.Add($"Turned {(on ? "on" : "off")} the computer.");
+                responses.Add(AgentReplies.Computer(on));
                 break;
             }
             // music/volume have no room — they target the single speaker (Living Room).
@@ -318,15 +343,15 @@ public class HomeAgentConnector : MonoBehaviour
                 if (string.IsNullOrEmpty(genre)) genre = "jazz";
                 yield return _home.WalkTo(sroom, HomeDeviceController.Device.Speaker);
                 if (_home.SetMusic(sroom, true, genre))
-                    responses.Add($"Playing {genre} music.");
-                else responses.Add("There's no speaker.");
+                    responses.Add(AgentReplies.Playing(genre));
+                else responses.Add(AgentReplies.NoSpeaker);
                 break;
             }
             case "stop_music":
             {
                 var sroom = HomeDeviceController.Room.LivingRoom;
                 yield return _home.WalkTo(sroom, HomeDeviceController.Device.Speaker);
-                responses.Add(_home.SetMusic(sroom, false) ? "Stopped the music." : "There's no speaker.");
+                responses.Add(_home.SetMusic(sroom, false) ? AgentReplies.MusicStopped : AgentReplies.NoSpeaker);
                 break;
             }
             case "set_volume":
@@ -334,13 +359,13 @@ public class HomeAgentConnector : MonoBehaviour
                 var sroom = HomeDeviceController.Room.LivingRoom;
                 var v = Arg(call, "volume"); int vi = int.TryParse(v, out var vv) ? vv : 50;
                 yield return _home.WalkTo(sroom, HomeDeviceController.Device.Speaker);
-                responses.Add(_home.SetVolume(sroom, vi) ? $"Set the volume to {vi}%." : "There's no speaker.");
+                responses.Add(_home.SetVolume(sroom, vi) ? AgentReplies.VolumeSet(vi) : AgentReplies.NoSpeaker);
                 break;
             }
             case "get_volume":
             {
                 int cur = _home.GetVolume(HomeDeviceController.Room.LivingRoom);
-                responses.Add(cur >= 0 ? $"The volume is {cur}%." : "There's no speaker.");
+                responses.Add(cur >= 0 ? AgentReplies.VolumeIs(cur) : AgentReplies.NoSpeaker);
                 break;
             }
             // Vacuum is a single device (lives in the Bedroom) — no room arg. Walk up to
@@ -350,7 +375,7 @@ public class HomeAgentConnector : MonoBehaviour
                 var vacRoom = HomeDeviceController.Room.Bedroom;
                 yield return _home.WalkTo(vacRoom, HomeDeviceController.Device.Vacuum);
                 _home.StartVacuum();
-                responses.Add("The robot vacuum started cleaning.");
+                responses.Add(AgentReplies.VacuumStarted);
                 break;
             }
             // ---- local intents (merged from the voice agent; see LocalIntents) ----
@@ -358,7 +383,7 @@ public class HomeAgentConnector : MonoBehaviour
             {
                 var vacRoom = HomeDeviceController.Room.Bedroom;
                 yield return _home.WalkTo(vacRoom, HomeDeviceController.Device.Vacuum);
-                responses.Add(_home.StopVacuum() ? "The robot vacuum stopped and is heading back to its dock." : "There's no robot vacuum.");
+                responses.Add(_home.StopVacuum() ? AgentReplies.VacuumStopped : AgentReplies.NoVacuum);
                 break;
             }
             case "volume_up":
@@ -369,14 +394,12 @@ public class HomeAgentConnector : MonoBehaviour
                 int target = Mathf.Clamp(_home.GetVolume(sroom) + step, 0, 100);
                 yield return _home.WalkTo(sroom, HomeDeviceController.Device.Speaker);
                 responses.Add(_home.SetVolume(sroom, target)
-                    ? $"Volume {(step > 0 ? "up" : "down")} to {target}%."
-                    : "There's no speaker.");
+                    ? AgentReplies.VolumeStep(step > 0, target)
+                    : AgentReplies.NoSpeaker);
                 break;
             }
             case "introduce_self":
-                responses.Add("I'm Tiger, the smart-home assistant of this house. I can switch the lights in the kitchen, " +
-                              "living room and bedroom, the TV, the computer and the robot vacuum, play music and change " +
-                              "the volume, and tell you the weather, the time or look things up.");
+                responses.Add(AgentReplies.Introduction);
                 break;
             case "get_weather":
             {
@@ -415,12 +438,10 @@ public class HomeAgentConnector : MonoBehaviour
                 if (_useCloudFallback)
                 {
                     SetStatus($"web_search{{{query}}} synthesizing...");
-                    const string sys =
+                    string sys =
                         "You answer the user's question using the web search results provided. " +
                         "Ground your answer in them; if they are insufficient, answer from your own " +
-                        "knowledge and note that briefly. Reply in EXACTLY the language the question " +
-                        "is written in (Korean question -> Korean answer, English -> English; never " +
-                        "any other language). One or two sentences.";
+                        "knowledge and note that briefly. " + AgentReplies.ReplyLanguageRule + " One or two sentences.";
                     string prompt = string.IsNullOrEmpty(context)
                         ? $"Question: {query}\n\n(No search results were found.)"
                         : $"Question: {query}\n\nWeb search results:\n{context}";
@@ -431,17 +452,17 @@ public class HomeAgentConnector : MonoBehaviour
                 }
                 // 3) fallback: raw retrieved snippet, or a not-found note
                 if (string.IsNullOrEmpty(answer))
-                    answer = !string.IsNullOrEmpty(context) ? context : $"I couldn't find an answer for \"{query}\".";
+                    answer = !string.IsNullOrEmpty(context) ? context : AgentReplies.NotFound(query);
                 responses.Add(answer);
                 break;
             }
             default:
-                responses.Add($"Can't handle '{call.Name}'.");
+                responses.Add(AgentReplies.CantHandleCall(call.Name));
                 break;
         }
     }
 
-    static string NoRoom(string r) => $"There's no '{r}' room in this house. (Kitchen / Living Room / Bedroom)";
+    static string NoRoom(string r) => AgentReplies.NoRoom(r);
 
     static string Arg(ParsedCall c, string key)
     {
@@ -465,14 +486,34 @@ public class HomeAgentConnector : MonoBehaviour
         RoundImage(_sendButton != null ? _sendButton.GetComponent<Image>() : null, round);
         RoundImage(_input != null ? _input.GetComponent<Image>() : null, round);
         if (_status != null) RoundImage(_status.GetComponentInParent<Image>(), round);
-        if (_input != null && _input.placeholder is Text ph)
-            ph.text = "Type a command (e.g., turn on the living room light)";
+        ApplyLanguageLabels();
+    }
+
+    void ApplyLanguageLabels()
+    {
+        if (_input != null && _input.placeholder is TMP_Text ph)
+            ph.text = AgentReplies.InputPlaceholder;
         if (_sendButton != null)
         {
-            var label = _sendButton.GetComponentInChildren<Text>();
-            if (label != null) label.text = "Send";
+            var label = _sendButton.GetComponentInChildren<TMP_Text>();
+            if (label != null)
+            {
+                // "보내기" / "إرسال" are wider than "Send": shrink to fit the button on one line instead of wrapping.
+                if (!label.enableAutoSizing)
+                {
+                    label.fontSizeMax = label.fontSize;
+                    label.fontSizeMin = 16;
+                    label.enableAutoSizing = true;
+                    label.textWrappingMode = TextWrappingModes.NoWrap;
+                }
+                label.text = AgentReplies.Send;
+            }
         }
     }
+
+    void OnLanguageChanged(Lang lang) => ApplyLanguageLabels();
+
+    void OnDestroy() => AppLanguage.Changed -= OnLanguageChanged;
 
     static void RoundImage(Image img, Sprite s)
     {

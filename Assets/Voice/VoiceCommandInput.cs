@@ -1,4 +1,5 @@
 using System.Collections;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using VoiceAgent;                 // VoiceInput, ModelRoots (shared with the VoiceAgentDemo scene)
@@ -16,7 +17,7 @@ public class VoiceCommandInput : MonoBehaviour
     [SerializeField] private HomeAgentConnector _connector;
     [SerializeField] private Button _micButton;
     [Tooltip("Shows partial transcripts while you talk (the agent's command field).")]
-    [SerializeField] private InputField _input;
+    [SerializeField] private TMP_InputField _input;
 
     [Header("Mic button colors")]
     [SerializeField] private Color _idleColor = new(0.20f, 0.55f, 0.95f);
@@ -24,7 +25,7 @@ public class VoiceCommandInput : MonoBehaviour
     [SerializeField] private Color _disabledColor = new(0.55f, 0.55f, 0.58f);
 
     VoiceInput m_Voice;
-    Text m_Label;
+    TMP_Text m_Label;
     Image m_Image;
     string m_Pending;             // a final transcript waiting for the agent to finish its current turn
 
@@ -37,7 +38,7 @@ public class VoiceCommandInput : MonoBehaviour
         if (_micButton != null)
         {
             _micButton.onClick.AddListener(ToggleListen);
-            m_Label = _micButton.GetComponentInChildren<Text>();
+            m_Label = _micButton.GetComponentInChildren<TMP_Text>();
             m_Image = _micButton.GetComponent<Image>();
             if (m_Image != null) { m_Image.sprite = UiRuntimeAssets.RoundedSprite(16f); m_Image.type = Image.Type.Sliced; }
         }
@@ -74,7 +75,7 @@ public class VoiceCommandInput : MonoBehaviour
         m_Voice.Final += OnFinal;
         m_Voice.ListeningStopped += () => SetButton("Mic", _idleColor, true);
         SetButton("Mic", _idleColor, true);
-        Debug.Log("[Voice] speech-to-text ready (Silero VAD + SenseVoice)");
+        Debug.Log($"[Voice] speech-to-text ready (Silero VAD + SenseVoice; Whisper-{ModelRoots.WhisperSize} for Arabic)");
     }
 
     void ToggleListen()
@@ -84,7 +85,9 @@ public class VoiceCommandInput : MonoBehaviour
         if (_connector != null && _connector.IsBusy) return;   // one turn at a time
         if (!m_Voice.Listen())
         {
-            Debug.LogWarning("[Voice] can't listen: no microphone, or mic permission not granted yet.");
+            Debug.LogWarning(m_Voice.CanListen
+                ? "[Voice] can't listen: no microphone, or mic permission not granted yet."
+                : $"[Voice] can't listen: no speech model for {AppLanguage.Code(m_Voice.Language)} (Arabic needs VoiceAgent ▸ Speech ▸ Download Whisper {ModelRoots.WhisperSize}).");
             return;
         }
         if (_input != null) _input.text = "";

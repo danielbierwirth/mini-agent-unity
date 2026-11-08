@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 using SentisModels;
 using VoiceAgent.Info;
@@ -109,7 +110,65 @@ namespace VoiceAgent.Scenes
             m_View.SetMicState(MicState.Idle);
             m_View.SetStatus(string.Empty);
             UnityEngine.Debug.Log($"[VoiceAgent] ready in {clock.Elapsed.TotalSeconds:F1} s");
-            m_View.AddMessage(persona.greeting, false);
+            m_View.AddMessage(persona.Greeting(AppLanguage.Current), false);
+        }
+
+        // ---- test hooks (play mode, e.g. via script eval): the same paths typed text and a spoken utterance take ----
+
+        public bool IsReady => m_Controller != null;
+        public bool IsBusy => m_Controller == null || m_Controller.IsBusy || m_Speech.IsSpeaking;
+
+        /// <summary>Runs a turn as if <paramref name="text"/> were typed and submitted.</summary>
+        public void SubmitText(string text) => _ = m_Controller.Submit(text);
+
+        /// <summary>Runs a turn as if speech-to-text had just produced <paramref name="transcript"/>.</summary>
+        public void InjectTranscript(string transcript) => _ = m_Controller.Submit(transcript, new VoiceTiming(0, 0, 0));
+
+        /// <summary>
+        /// Speaks <paramref name="text"/> with Supertonic, resamples it to 16 kHz and transcribes it with the selected
+        /// language's speech-to-text model, whose final transcript then runs a voice turn. Returns the transcript.
+        /// </summary>
+        public async Awaitable<string> SpeakAndListen(string text)
+        {
+            var (pcm, rate) = await m_Speech.SynthesizeClip(text);
+            var audio = Resample(pcm, rate, MicrophoneStream.SampleRate);
+            string heard = null;
+            void Capture(string t) => heard = t;
+            m_Voice.Final += Capture;
+            try
+            {
+                await m_Voice.TranscribeClipAsync(audio);
+            }
+            finally
+            {
+                m_Voice.Final -= Capture;
+            }
+            return heard;
+        }
+
+        static float[] Resample(float[] pcm, int from, int to)
+        {
+            if (from == to || pcm.Length == 0) return pcm;
+            // Box low-pass over one output period first, so the decimation doesn't fold the highs into the speech band.
+            var width = Math.Max(1, (int)Math.Round((double)from / to));
+            var smooth = new float[pcm.Length];
+            double sum = 0;
+            for (var i = 0; i < pcm.Length; i++)
+            {
+                sum += pcm[i];
+                if (i >= width) sum -= pcm[i - width];
+                smooth[i] = (float)(sum / Math.Min(i + 1, width));
+            }
+            pcm = smooth;
+            var output = new float[(int)((long)pcm.Length * to / from)];
+            for (var i = 0; i < output.Length; i++)
+            {
+                var at = (double)i * from / to;
+                var j = (int)at;
+                var t = (float)(at - j);
+                output[i] = j + 1 < pcm.Length ? pcm[j] * (1 - t) + pcm[j + 1] * t : pcm[^1];
+            }
+            return output;
         }
 
         void ToggleListen()

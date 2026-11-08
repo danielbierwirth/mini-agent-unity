@@ -1,6 +1,8 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using VoiceAgent;   // AutoRtlText
 
 /// <summary>
 /// A button that switches to another scene (MiniAgentScene ⇄ VoiceAgentDemo). It builds its own small overlay canvas so
@@ -52,17 +54,18 @@ public class SceneToggle : MonoBehaviour
         m_Button = buttonGo.GetComponent<Button>();
         m_Button.onClick.AddListener(Switch);
 
-        var textGo = new GameObject("Label", typeof(RectTransform), typeof(Text));
+        var textGo = new GameObject("Label", typeof(RectTransform), typeof(AutoRtlText));
         textGo.transform.SetParent(buttonGo.transform, false);
         var trt = (RectTransform)textGo.transform;
         trt.anchorMin = Vector2.zero;
         trt.anchorMax = Vector2.one;
         trt.offsetMin = trt.offsetMax = Vector2.zero;
-        var text = textGo.GetComponent<Text>();
-        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        var text = textGo.GetComponent<AutoRtlText>();
         text.fontSize = _fontSize;
-        text.alignment = TextAnchor.MiddleCenter;
+        text.alignment = TextAlignmentOptions.Center;
         text.color = Color.white;
+        text.textWrappingMode = TextWrappingModes.NoWrap;
+        text.raycastTarget = false;
         text.text = _label;
     }
 
