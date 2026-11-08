@@ -1,6 +1,8 @@
 using System.Collections;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using VoiceAgent;   // AutoRtlText
 
 /// <summary>
 /// A speech bubble that floats above Tiger's head and shows the agent's reply.
@@ -18,10 +20,9 @@ public class TigerSpeechBubble : MonoBehaviour
     [Header("Scene UI (pre-placed; auto-built if left empty)")]
     [SerializeField] private Canvas _canvas;             // Screen-Space-Overlay canvas
     [SerializeField] private RectTransform _panel;       // rounded bubble background
-    [SerializeField] private Text _text;                 // reply text
+    [SerializeField] private TMP_Text _text;             // reply text (RTL text component: Arabic replies are shaped)
 
     private Camera _cam;
-    private Font _font;
     private float _headWorldY;     // offset from Tiger origin to the top of its bounds
     private Coroutine _hideCo;
 
@@ -35,8 +36,6 @@ public class TigerSpeechBubble : MonoBehaviour
             if (t != null) _tiger = t.transform;
         }
         _cam = Camera.main;
-        _font = UiRuntimeAssets.KoreanOsFont(40);
-        if (_font == null) _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
         MeasureHead();
         if (_panel != null && _text != null) StyleExisting();   // pre-placed in the scene
@@ -44,13 +43,13 @@ public class TigerSpeechBubble : MonoBehaviour
         _panel.gameObject.SetActive(false);
     }
 
-    // Apply the runtime look (Korean font, rounded translucent sprite, sort order) to a
-    // bubble that was authored in the scene, so no UI GameObjects are created at play time.
+    // Apply the runtime look (rounded translucent sprite, sort order) to a bubble that
+    // was authored in the scene, so no UI GameObjects are created at play time. Fonts come
+    // from the TMP font asset and its Korean / Arabic fallbacks.
     private void StyleExisting()
     {
         if (_canvas == null) _canvas = _panel.GetComponentInParent<Canvas>();
         if (_canvas != null) { _canvas.renderMode = RenderMode.ScreenSpaceOverlay; _canvas.sortingOrder = _sortingOrder; }
-        if (_font != null) _text.font = _font;
         var img = _panel.GetComponent<Image>();
         if (img != null) { img.sprite = RoundedSprite(); img.type = Image.Type.Sliced; }
     }
@@ -100,16 +99,17 @@ public class TigerSpeechBubble : MonoBehaviour
         fit.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
         fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        var txtGo = new GameObject("Text", typeof(RectTransform), typeof(Text));
+        var txtGo = new GameObject("Text", typeof(RectTransform), typeof(AutoRtlText));
         txtGo.transform.SetParent(_panel, false);
-        _text = txtGo.GetComponent<Text>();
-        _text.font = _font;
+        var rtl = txtGo.GetComponent<AutoRtlText>();
+        rtl.PreserveNumbers = true;
+        _text = rtl;
         _text.fontSize = 26;
         _text.color = Color.white;
-        _text.alignment = TextAnchor.MiddleCenter;
-        // we hard-wrap by chars ourselves, so let the generator size to the widest line
-        _text.horizontalOverflow = HorizontalWrapMode.Overflow;
-        _text.verticalOverflow = VerticalWrapMode.Overflow;
+        _text.alignment = TextAlignmentOptions.Center;
+        // we hard-wrap by chars ourselves, so let the layout size to the widest line
+        _text.textWrappingMode = TextWrappingModes.NoWrap;
+        _text.overflowMode = TextOverflowModes.Overflow;
         _text.raycastTarget = false;
     }
 

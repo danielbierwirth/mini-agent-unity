@@ -27,7 +27,9 @@ namespace VoiceAgent
     /// Turn logic of the voice agent. Typed or spoken text is ranked into command chips;
     /// on submit the best command runs when it is confident enough. "Who are you" gets the persona's introduction,
     /// weather/time/location/search are answered from the internet, and chat or low-confidence turns get a reply
-    /// from Gemma3 in the persona's voice.
+    /// from Gemma3 in the persona's voice. Every reply is in the selected <see cref="AppLanguage"/>. Arabic commands are
+    /// rewritten to the English command the Decision AI head was trained on (<see cref="ArabicCommands"/>) before
+    /// ranking; the user still sees what they typed or said.
     /// </summary>
     public sealed class AssistantController
     {
@@ -97,15 +99,18 @@ namespace VoiceAgent
 
         public List<RankedCommand> ShowChips(string text)
         {
-            if (string.IsNullOrWhiteSpace(text))
+            // The Decision AI head never saw Arabic: Arabic the command rules can't read is conversation, not a command.
+            if (string.IsNullOrWhiteSpace(text) || IsArabicChat(text))
             {
                 m_View.SetChips(null);
                 return null;
             }
-            var top = Ranking.Top(m_Catalog, m_Ranker.Score(text), m_View.MaxChips);
+            var top = Ranking.Top(m_Catalog, m_Ranker.Score(ArabicCommands.ForModel(text)), m_View.MaxChips);
             m_View.SetChips(top);
             return top;
         }
+
+        static bool IsArabicChat(string text) => ArabicText.ContainsArabic(text) && ArabicCommands.ToEnglish(text) == null;
 
         /// <summary>A spoken turn has started (the timing panel shows it as listening).</summary>
         public void BeginVoiceTurn()
@@ -130,12 +135,21 @@ namespace VoiceAgent
                 if (voice is { } v)
                 {
                     m_Timing.Listening(v.Partials, v.SpeechSeconds);
-                    m_Timing.Stage(0, "Speech to text / SenseVoice", v.SttMs, 0);
+                    m_Timing.Stage(0, AppLanguage.Current == Lang.Ar ? $"Speech to text / Whisper-{ModelRoots.WhisperSize}" : "Speech to text / SenseVoice", v.SttMs, 0);
                 }
                 else m_Timing.Stage(0, "Speech to text / typed", 0, 0);
             }
             var intentClock = Stopwatch.StartNew();
             var top = ShowChips(text);
+            if (top == null)
+            {
+                m_IntentSeconds = intentClock.Elapsed.TotalSeconds;
+                m_Timing?.Stage(1, "Intent / Arabic rules: chat", m_IntentSeconds * 1000, m_SttSeconds);
+                m_ActionClock.Restart();
+                UnityEngine.Debug.Log($"[Turn] '{text}' → Chat (no Arabic command)");
+                await Reply(text);
+                return;
+            }
             var best = top[0];
             m_IntentSeconds = intentClock.Elapsed.TotalSeconds;
             if (m_Timing != null)
@@ -155,7 +169,7 @@ namespace VoiceAgent
             if (route == TurnRoute.LowConfidence)
             {
                 // Ask instead of letting Gemma improvise; the chips stay up so the user can tap the right command.
-                var line = m_Persona.Clarify(TurnRouting.Suggestion(top), LangDetect.Of(text));
+                var line = m_Persona.Clarify(TurnRouting.Suggestion(top), AppLanguage.Current);
                 ActionDone("Action / asked to confirm");
                 m_View.AddMessage(line, false);
                 await Speak(line);
@@ -168,7 +182,7 @@ namespace VoiceAgent
         {
             if (m_Busy) return;
             var typed = m_View.InputText.Trim();
-            var text = typed.Length > 0 ? typed : command.label;
+            var text = typed.Length > 0 ? typed : command.Label(AppLanguage.Current);
             m_View.AddMessage(text, true);
             m_View.SetInputText(string.Empty);
             m_View.SetChips(null);
@@ -190,7 +204,7 @@ namespace VoiceAgent
             if (command.id == CommandCatalog.IntroduceSelf)
             {
                 ActionDone("Action / Nova's introduction");
-                var introduction = m_Persona.Introduction(LangDetect.Of(userText));
+                var introduction = m_Persona.Introduction(AppLanguage.Current);
                 m_View.AddMessage(introduction, false);
                 await Speak(introduction);
                 return;
@@ -198,15 +212,17 @@ namespace VoiceAgent
 
             if (m_Info != null && InfoAgent.Supports(command.id))
             {
-                // Internet answers follow the question's language: a Korean question searches Korean sources and is answered in Korean.
-                var lang = LangDetect.Of(userText);
+                // Internet answers are in the selected language: Korean searches Korean sources, Arabic Arabic ones. Weather
+                // and time read the English rewrite of an Arabic question ("in Dubai"); a search keeps the words as typed.
+                var lang = AppLanguage.Current;
+                var question = command.id == CommandCatalog.WebSearch ? userText : ArabicCommands.ForModel(userText);
                 m_Busy = true;
                 m_View.SetMicState(MicState.Thinking);
                 var bubble = m_View.AddMessage(InfoAgent.LookingUp(lang), false);
                 InfoAnswer answer;
                 try
                 {
-                    answer = await m_Info.AnswerAsync(command.id, userText, lang, step => m_View.UpdateMessage(bubble, step));
+                    answer = await m_Info.AnswerAsync(command.id, question, lang, step => m_View.UpdateMessage(bubble, step));
                 }
                 finally
                 {
@@ -214,7 +230,7 @@ namespace VoiceAgent
                 }
                 if (answer == null)
                 {
-                    var local = m_Home.Execute(command, userText);
+                    var local = m_Home.Execute(command, userText, lang);
                     ActionDone("Action / local clock");
                     m_View.UpdateMessage(bubble, local);
                     await Speak(local);
@@ -232,7 +248,7 @@ namespace VoiceAgent
                 return;
             }
 
-            var reply = m_Home.Execute(command, userText);
+            var reply = m_Home.Execute(command, userText, AppLanguage.Current);
             if (reply == null)
             {
                 await Reply(userText);
@@ -244,7 +260,7 @@ namespace VoiceAgent
         }
 
         static string WithSources(string text, string sources) =>
-            string.IsNullOrEmpty(sources) ? text : $"{text}\n<size=15><color=#6B6780>Source / {sources}</color></size>";
+            string.IsNullOrEmpty(sources) ? text : $"{text}\n<size=15><color=#6B6780>{(AppLanguage.Current == Lang.Ar ? "المصدر" : "Source")} / {sources}</color></size>";
 
         async Awaitable Reply(string text, MessageView bubble = null, string prefix = null)
         {
@@ -257,7 +273,7 @@ namespace VoiceAgent
             string answer;
             try
             {
-                m_Gemma.SystemPrompt = m_Persona.SystemPrompt(LangDetect.Of(text), search);
+                m_Gemma.SystemPrompt = m_Persona.SystemPrompt(AppLanguage.Current, search);
                 answer = ReplyText.Clean(await m_Gemma.GenerateAsync(text, 48, partial => m_View.UpdateMessage(bubble, prefix + ReplyText.Clean(partial))));
             }
             catch (System.Exception e)
@@ -272,7 +288,14 @@ namespace VoiceAgent
             }
             // The small model doesn't always keep to the prompt's length, so the cut is also made here.
             if (search && answer != null) answer = InfoText.FirstSentences(answer, 2);
-            if (string.IsNullOrWhiteSpace(answer)) answer = m_Persona.NotSure(LangDetect.Of(text));
+            // Gemma3-270M doesn't always keep to Arabic; a reply without Arabic letters is replaced rather than shown in
+            // another language.
+            if (AppLanguage.Current == Lang.Ar && answer != null && !ArabicText.ContainsArabic(answer))
+            {
+                UnityEngine.Debug.Log($"[Turn] Gemma answered outside Arabic, replaced: {answer}");
+                answer = null;
+            }
+            if (string.IsNullOrWhiteSpace(answer)) answer = m_Persona.NotSure(AppLanguage.Current);
             answer = prefix + answer;
             ActionDone(prefix.Length > 0 ? "Action / search + Gemma3" : "Action / Gemma3 reply");
             m_View.UpdateMessage(bubble, answer);

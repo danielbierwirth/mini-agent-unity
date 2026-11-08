@@ -4,7 +4,12 @@
     "references": [
         "VoiceAgent.Runtime",
         "Unity.InferenceEngine",
-        "Sky.Sentis.Gemma3"
+        "Sky.Sentis.Gemma3",
+        "UnityEngine.UI",
+        "Unity.TextMeshPro",
+        "Unity.TextMeshPro.Editor",
+        "RTLTMPro",
+        "RTLTMPro-Editor"
     ],
     "includePlatforms": [
         "Editor"

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using SentisModels;
 using Unity.InferenceEngine;
 using UnityEngine;
@@ -7,12 +8,15 @@ using UnityEngine;
 // Copied from voice-agent-unity and shared by both scenes (VoiceAgentDemo and MiniAgentScene's VoiceCommandInput).
 // mini-agent changes: IsLoaded, the VAD backlog is drained with Pump()'s return value (silero-vad 0.1.2), and
 // SenseVoice spreads its encoder pass over frames on mobile (sensevoice 0.1.1+) so a 3D scene keeps its frame rate.
+// Language: the selected AppLanguage, set explicitly (SenseVoice for English/Korean, Whisper for Arabic).
 namespace VoiceAgent
 {
     /// <summary>
     /// Microphone → Silero VAD → SenseVoice, one utterance per <see cref="Listen"/> (tap to talk).
     /// Speech start opens a SenseVoice utterance (with 0.4 s of pre-roll), speech end closes it; partials
-    /// arrive while talking and one final per utterance. The language is detected per utterance (English or Korean).
+    /// arrive while talking and one final per utterance. The language is the selected <see cref="AppLanguage"/>, passed
+    /// to the model explicitly: SenseVoice for English and Korean; Arabic, which SenseVoice can't transcribe, goes to
+    /// Whisper (ModelRoots.WhisperSize) with the Arabic language token (final transcript only, no partials).
     /// </summary>
     public sealed class VoiceInput : IDisposable
     {
@@ -25,6 +29,9 @@ namespace VoiceAgent
         readonly MicrophoneStream m_Mic = new();
         readonly SileroVad m_Vad;
         readonly SenseVoiceRecognizer m_Stt;
+        WhisperRecognizer m_Whisper;
+        Lang m_Language;
+        bool m_WhisperUtterance;
         readonly float[] m_PreRoll = new float[PreRollSamples];
         readonly List<float> m_Utterance = new();
         float[] m_Finished = Array.Empty<float>();
@@ -40,6 +47,9 @@ namespace VoiceAgent
         public float Level => m_Mic.Level;
         public SenseVoiceRecognizer Recognizer => m_Stt;
         public bool IsLoaded => m_Stt.IsLoaded;
+        public Lang Language => m_Language;
+        /// <summary>Whisper's last transcription time, for the timing panel.</summary>
+        public double LastWhisperMs => m_Whisper?.LastMs ?? 0;
 
         public VoiceInput()
         {
@@ -53,17 +63,61 @@ namespace VoiceAgent
             m_Vad.SpeechStarted += OnSpeechStarted;
             m_Vad.SpeechEnded += OnSpeechEnded;
             m_Stt.PartialTranscript += text => Partial?.Invoke(text);
-            m_Stt.ResultReady += async (result, final) =>
+            m_Stt.ResultReady += (result, final) =>
             {
-                if (final) await FinishAsync(result);
+                if (final && !m_Disposed) Final?.Invoke(result.Text);
             };
+
+            SetLanguage(AppLanguage.Current);
+            AppLanguage.Changed += SetLanguage;
         }
+
+        // SenseVoiceRecognizer takes its language only in the constructor; reloading the model on every switch would cost
+        // seconds, so the field is set directly (the package reads it on every pass).
+        static readonly FieldInfo s_SenseVoiceLanguage = typeof(SenseVoiceRecognizer).GetField("m_Language", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        /// <summary>The language the next utterance is transcribed in; Arabic loads Whisper on first use.</summary>
+        public void SetLanguage(Lang lang)
+        {
+            m_Language = lang;
+            if (SpeechLanguage.UsesWhisper(lang))
+            {
+                LoadWhisper();
+                return;
+            }
+            if (s_SenseVoiceLanguage != null) s_SenseVoiceLanguage.SetValue(m_Stt, SpeechLanguage.SenseVoice(lang));
+            else Debug.LogWarning("[Voice] this SenseVoice version has no m_Language field; it keeps auto-detecting the language");
+        }
+
+        void LoadWhisper()
+        {
+            if (m_Whisper != null || m_Disposed) return;
+            if (!WhisperRecognizer.Exists(ModelRoots.Whisper))
+            {
+                Debug.LogWarning($"[Voice] Arabic speech needs Whisper-{ModelRoots.WhisperSize} in {ModelRoots.Whisper}: run VoiceAgent ▸ Speech ▸ Download Whisper …");
+                return;
+            }
+            try
+            {
+                var whisper = new WhisperRecognizer();
+                whisper.Load(ModelRoots.Whisper);
+                m_Whisper = whisper;
+                Debug.Log($"[Voice] Whisper-{ModelRoots.WhisperSize} loaded (Arabic)");
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+            }
+        }
+
+        /// <summary>Whether the selected language's speech model is loaded.</summary>
+        public bool CanListen => SpeechLanguage.UsesWhisper(m_Language) ? m_Whisper != null && m_Whisper.IsLoaded : m_Stt.IsLoaded;
 
         /// <summary>False without a microphone, or when SenseVoice didn't load (it logs the error).</summary>
         public bool Listen()
         {
             if (m_Listening) return true;
-            if (m_Disposed || !m_Stt.IsLoaded || !m_Mic.Start()) return false;
+            if (m_Disposed || !CanListen || !m_Mic.Start()) return false;
             m_Vad.StartListening();
             m_Listening = true;
             m_InSpeech = false;
@@ -76,9 +130,10 @@ namespace VoiceAgent
             if (!m_Listening) return;
             if (m_InSpeech)
             {
-                // A language retry transcribes this copy: the next utterance may already be filling m_Utterance.
+                // The final pass transcribes this copy: the next utterance may already be filling m_Utterance.
                 m_Finished = m_Utterance.ToArray();
-                m_Stt.EndUtterance();
+                if (m_WhisperUtterance) _ = FinishWhisperAsync(m_Finished);
+                else m_Stt.EndUtterance();
             }
             m_InSpeech = false;
             m_Listening = false;
@@ -106,7 +161,7 @@ namespace VoiceAgent
             m_Vad.PushSamples(samples, count);
             if (m_InSpeech)
             {
-                m_Stt.PushSamples(samples, count, sequence);
+                if (!m_WhisperUtterance) m_Stt.PushSamples(samples, count, sequence);
                 for (var i = 0; i < count; i++) m_Utterance.Add(samples[i]);
             }
         }
@@ -115,25 +170,52 @@ namespace VoiceAgent
         {
             if (!m_Listening || m_InSpeech) return;
             m_InSpeech = true;
-            m_Stt.BeginUtterance();
+            // The language can't change inside an utterance: it is fixed here, when speech starts.
+            m_WhisperUtterance = SpeechLanguage.UsesWhisper(m_Language) && m_Whisper != null;
             // Right after the mic opens the pre-roll holds fewer real samples than its length: push only those, so their
             // stream positions line up with the chunks that follow.
             var recent = m_PreRoll[(PreRollSamples - (int)Math.Min(PreRollSamples, m_PreRollEnd))..];
-            m_Stt.PushSamples(recent, recent.Length, m_PreRollEnd - recent.Length);
+            if (!m_WhisperUtterance)
+            {
+                m_Stt.BeginUtterance();
+                m_Stt.PushSamples(recent, recent.Length, m_PreRollEnd - recent.Length);
+            }
             m_Utterance.Clear();
             m_Utterance.AddRange(recent);
             SpeechStarted?.Invoke();
         }
 
-        async Awaitable FinishAsync(SenseVoiceResult result)
+        async Awaitable FinishWhisperAsync(float[] audio)
         {
-            var retry = SpeechLanguage.Retry(result.Language);
-            if (retry != null && m_Finished.Length > 0)
+            string text;
+            try
             {
-                result = await m_Stt.TranscribeAsync(m_Finished, retry);
-                if (m_Disposed) return;
+                text = await m_Whisper.TranscribeAsync(audio, AppLanguage.Code(Lang.Ar));
             }
-            Final?.Invoke(result.Text);
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                text = string.Empty;
+            }
+            if (m_Disposed) return;
+            Debug.Log($"[Voice] Whisper (ar, {m_Whisper.LastMs:F0} ms): {text}");
+            Final?.Invoke(text);
+        }
+
+        /// <summary>
+        /// Test hook: transcribes a clip (16 kHz mono) with the selected language's model and raises <see cref="Final"/>,
+        /// as a spoken utterance would.
+        /// </summary>
+        public async Awaitable TranscribeClipAsync(float[] audio)
+        {
+            if (SpeechLanguage.UsesWhisper(m_Language))
+            {
+                if (m_Whisper == null) LoadWhisper();
+                if (m_Whisper != null) await FinishWhisperAsync(audio);
+                return;
+            }
+            var result = await m_Stt.TranscribeAsync(audio, SpeechLanguage.SenseVoice(m_Language));
+            if (!m_Disposed) Final?.Invoke(result.Text);
         }
 
         void OnSpeechEnded()
@@ -145,6 +227,8 @@ namespace VoiceAgent
         public void Dispose()
         {
             m_Disposed = true;
+            AppLanguage.Changed -= SetLanguage;
+            m_Whisper?.Dispose();
             m_Mic.Dispose();
             m_Vad.Dispose();
             m_Stt.Dispose();

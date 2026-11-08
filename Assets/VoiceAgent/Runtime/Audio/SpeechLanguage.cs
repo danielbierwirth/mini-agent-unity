@@ -3,17 +3,14 @@ using SentisModels;
 namespace VoiceAgent
 {
     /// <summary>
-    /// SenseVoice detects five languages, but Nova understands English and Korean. Short utterances are sometimes
-    /// labelled with a neighbour (Korean as Japanese, English as Chinese); those are decoded again with the language
-    /// that was most likely meant.
+    /// Which speech-to-text model hears the selected language, and with which language id. SenseVoice transcribes English
+    /// and Korean and is told the language explicitly (no auto-detection, which used to label short Korean as Japanese
+    /// and short English as Chinese). SenseVoice has no Arabic at all, so Arabic goes to Whisper (base by default, ModelRoots.WhisperSize) with &lt;|ar|&gt;.
     /// </summary>
     public static class SpeechLanguage
     {
-        public static SenseVoiceLanguage? Retry(SenseVoiceLanguage detected) => detected switch
-        {
-            SenseVoiceLanguage.Ja => SenseVoiceLanguage.Ko,
-            SenseVoiceLanguage.Zh or SenseVoiceLanguage.Yue => SenseVoiceLanguage.En,
-            _ => null,
-        };
+        public static bool UsesWhisper(Lang lang) => lang == Lang.Ar;
+
+        public static SenseVoiceLanguage SenseVoice(Lang lang) => lang == Lang.Ko ? SenseVoiceLanguage.Ko : SenseVoiceLanguage.En;
     }
 }

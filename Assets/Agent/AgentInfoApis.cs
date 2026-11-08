@@ -9,6 +9,7 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
+using VoiceAgent;   // AppLanguage: replies in the selected language
 
 namespace NeedleTest
 {
@@ -25,7 +26,12 @@ namespace NeedleTest
             ["베이징"] = "Beijing", ["북경"] = "Beijing", ["상하이"] = "Shanghai",
             ["방콕"] = "Bangkok", ["싱가포르"] = "Singapore", ["샌프란시스코"] = "San Francisco",
             ["로스앤젤레스"] = "Los Angeles", ["시카고"] = "Chicago", ["하노이"] = "Hanoi",
+            ["دبي"] = "Dubai", ["الرياض"] = "Riyadh", ["جدة"] = "Jeddah", ["القاهرة"] = "Cairo", ["الدوحة"] = "Doha",
+            ["أبوظبي"] = "Abu Dhabi", ["عمّان"] = "Amman", ["عمان"] = "Amman", ["بيروت"] = "Beirut", ["لندن"] = "London",
+            ["باريس"] = "Paris", ["طوكيو"] = "Tokyo", ["سيول"] = "Seoul", ["نيويورك"] = "New York",
         };
+
+        static string Pick(string en, string ko, string ar) => AppLanguage.Pick(en, ko, ar);
 
         // Common English misspellings -> canonical name. The model is trained to correct
         // typos in the city arg, but this is a runtime safety net (matched case-insensitively).
@@ -92,16 +98,21 @@ namespace NeedleTest
 
         static string WxDesc(int code) => code switch
         {
-            0 => "clear", 1 => "mostly clear", 2 => "partly cloudy", 3 => "overcast",
-            45 or 48 => "foggy", >= 51 and <= 67 => "rain", >= 71 and <= 86 => "snow",
-            >= 95 => "thunderstorm", _ => "precipitation",
+            0 => Pick("clear", "맑음", "صافٍ"), 1 => Pick("mostly clear", "대체로 맑음", "صافٍ في الغالب"),
+            2 => Pick("partly cloudy", "구름 조금", "غائم جزئيًا"), 3 => Pick("overcast", "흐림", "غائم"),
+            45 or 48 => Pick("foggy", "안개", "ضبابي"), >= 51 and <= 67 => Pick("rain", "비", "مطر"),
+            >= 71 and <= 86 => Pick("snow", "눈", "ثلج"), >= 95 => Pick("thunderstorm", "뇌우", "عاصفة رعدية"),
+            _ => Pick("precipitation", "강수", "هطول"),
         };
+
+        static string NoCity(string city) => Pick($"Couldn't find the city '{city}'.", $"'{city}' 도시를 찾지 못했어요.", $"لم أجد مدينة '{city}'.");
+        static string TimeIn(string time, string city) => Pick($"It's currently {time} in {city}.", $"{city}은(는) 지금 {time}이에요.", $"الساعة الآن {time} في {city}.");
 
         public static IEnumerator GetWeather(string city, Action<string> done)
         {
             GeoHit hit = null;
             yield return Geocode(city, h => hit = h);
-            if (hit == null) { done($"Couldn't find the city '{city}'."); yield break; }
+            if (hit == null) { done(NoCity(city)); yield break; }
             string answer = "(weather API error)";
             yield return Get(
                 "https://api.open-meteo.com/v1/forecast?current_weather=true" +
@@ -109,8 +120,9 @@ namespace NeedleTest
                 t =>
                 {
                     var w = JsonUtility.FromJson<WxResp>(t).current_weather;
-                    answer = $"It's currently {w.temperature:F1}°C in {city}, " +
-                             $"{WxDesc(w.weathercode)}, wind {w.windspeed:F0} km/h.";
+                    answer = Pick($"It's currently {w.temperature:F1}°C in {city}, {WxDesc(w.weathercode)}, wind {w.windspeed:F0} km/h.",
+                                  $"{city}은(는) 지금 {w.temperature:F1}°C, {WxDesc(w.weathercode)}, 바람 {w.windspeed:F0} km/h예요.",
+                                  $"الطقس الآن في {city}: {w.temperature:F1}°C، {WxDesc(w.weathercode)}، والرياح {w.windspeed:F0} كم/س.");
                 },
                 e => answer = "(weather API error: " + e + ")");
             done(answer);
@@ -130,23 +142,23 @@ namespace NeedleTest
                         {
                             var tz = TimeZoneInfo.FindSystemTimeZoneById(r.timezone);
                             var tt = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
-                            local = $"It's currently {tt:HH:mm} in {r.city}.";
+                            local = TimeIn($"{tt:HH:mm}", r.city);
                         }
-                        catch { local = $"It's currently {DateTime.Now:HH:mm} in {r.city}."; }
+                        catch { local = TimeIn($"{DateTime.Now:HH:mm}", r.city); }
                     },
                     _ => { });
-                done(local ?? $"It's currently {DateTime.Now:HH:mm}.");
+                done(local ?? Pick($"It's currently {DateTime.Now:HH:mm}.", $"지금은 {DateTime.Now:HH:mm}이에요.", $"الساعة الآن {DateTime.Now:HH:mm}."));
                 yield break;
             }
             GeoHit hit = null;
             yield return Geocode(cityOrNull, h => hit = h);
-            if (hit == null) { done($"Couldn't find the city '{cityOrNull}'."); yield break; }
+            if (hit == null) { done(NoCity(cityOrNull)); yield break; }
             string answer;
             try
             {
                 var tz = TimeZoneInfo.FindSystemTimeZoneById(hit.timezone);
                 var t = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
-                answer = $"It's currently {t:HH:mm} in {cityOrNull}. ({hit.timezone})";
+                answer = TimeIn($"{t:HH:mm}", cityOrNull) + $" ({hit.timezone})";
             }
             catch (Exception e) { answer = "(timezone error: " + e.Message + ")"; }
             done(answer);
@@ -159,7 +171,9 @@ namespace NeedleTest
                 t =>
                 {
                     var r = JsonUtility.FromJson<IpResp>(t);
-                    answer = $"You're near {r.city}, {r.regionName}, {r.country}. (based on IP)";
+                    answer = Pick($"You're near {r.city}, {r.regionName}, {r.country}. (based on IP)",
+                                  $"{r.country} {r.regionName} {r.city} 근처에 계신 것 같아요. (IP 기준)",
+                                  $"أنت بالقرب من {r.city}، {r.regionName}، {r.country}. (بحسب عنوان IP)");
                 },
                 e => answer = "(location API error: " + e + ")");
             done(answer);

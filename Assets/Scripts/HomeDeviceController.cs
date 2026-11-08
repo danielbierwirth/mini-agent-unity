@@ -85,7 +85,7 @@ public class HomeDeviceController : MonoBehaviour
 
     // ---------------- room resolution ----------------
 
-    /// <summary>Map an EN/KO room word to a Room. Returns false if unknown.</summary>
+    /// <summary>Map an EN/KO/AR room word to a Room. Returns false if unknown.</summary>
     public bool TryResolveRoom(string s, out Room room)
     {
         room = Room.LivingRoom;
@@ -98,12 +98,15 @@ public class HomeDeviceController : MonoBehaviour
         switch (key)
         {
             case "kitchen": case "주방": case "부엌": case "키친": case "부억":
+            case "مطبخ": case "المطبخ":
                 room = Room.Kitchen; return true;
             case "living room": case "livingroom": case "living": case "lounge": case "lounge room":
             case "거실": case "마루": case "거실방": case "리빙룸": case "리빙 룸": case "응접실":
+            case "غرفة المعيشة": case "المعيشة": case "الصالة": case "صالة": case "الصالون": case "غرفة الجلوس":
                 room = Room.LivingRoom; return true;
             case "bedroom": case "bed room": case "master bedroom":
             case "안방": case "침실": case "침실방": case "베드룸": case "안 방":
+            case "غرفة النوم": case "النوم":
                 room = Room.Bedroom; return true;
         }
         // space-insensitive fallback for the multi-word EN synonyms

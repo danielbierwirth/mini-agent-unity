@@ -9,7 +9,9 @@
         "Sky.Sentis.Supertonic",
         "UnityEngine.UI",
         "Unity.InputSystem",
-        "Sky.Sentis.Gemma3"
+        "Sky.Sentis.Gemma3",
+        "Unity.TextMeshPro",
+        "RTLTMPro"
     ],
     "autoReferenced": true
 }

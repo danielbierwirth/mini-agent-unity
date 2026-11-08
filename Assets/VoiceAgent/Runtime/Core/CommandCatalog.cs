@@ -4,14 +4,18 @@ using UnityEngine;
 
 namespace VoiceAgent
 {
-    public enum Lang { Ko, En }
+    public enum Lang { Ko, En, Ar }
 
+    /// <summary>The script a text is written in: Hangul → Korean, Arabic letters → Arabic, anything else → English.</summary>
     public static class LangDetect
     {
         public static Lang Of(string text)
         {
             foreach (var c in text ?? string.Empty)
+            {
                 if (c >= '가' && c <= '힣') return Lang.Ko;
+                if (ArabicText.IsArabicLetter(c)) return Lang.Ar;
+            }
             return Lang.En;
         }
     }
@@ -19,10 +23,23 @@ namespace VoiceAgent
     [Serializable]
     public sealed class Command
     {
-        public string id, icon, color, label, reply, label_ko, reply_ko;
+        public string id, icon, color, label, reply, label_ko, reply_ko, label_ar, reply_ar;
         public string[] options;
 
-        public string Label(Lang lang) => lang == Lang.Ko && !string.IsNullOrEmpty(label_ko) ? label_ko : label;
+        public string Label(Lang lang) => lang switch
+        {
+            Lang.Ko when !string.IsNullOrEmpty(label_ko) => label_ko,
+            Lang.Ar when !string.IsNullOrEmpty(label_ar) => label_ar,
+            _ => label,
+        };
+
+        /// <summary>The reply template in <paramref name="lang"/>, falling back to English; empty when another component answers.</summary>
+        public string Reply(Lang lang) => lang switch
+        {
+            Lang.Ko when !string.IsNullOrEmpty(reply_ko) => reply_ko,
+            Lang.Ar when !string.IsNullOrEmpty(reply_ar) => reply_ar,
+            _ => reply,
+        };
         public Color Tint => ColorUtility.TryParseHtmlString(color, out var c) ? c : Color.gray;
     }
 

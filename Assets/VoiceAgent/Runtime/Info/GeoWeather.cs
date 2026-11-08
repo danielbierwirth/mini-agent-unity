@@ -105,7 +105,7 @@ namespace VoiceAgent.Info
 
         public async Awaitable<Place> GeocodeAsync(string name, Lang lang, CancellationToken cancel = default)
         {
-            var json = await m_Web.GetAsync($"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(name)}&count=1&language={(lang == Lang.Ko ? "ko" : "en")}&format=json", cancel);
+            var json = await m_Web.GetAsync($"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(name)}&count=1&language={AppLanguage.Code(lang)}&format=json", cancel);
             return ParseGeocode(json);
         }
 
@@ -126,11 +126,11 @@ namespace VoiceAgent.Info
                 m_IpPlace = ip;
             }
             var place = new Place { Name = m_IpPlace.Name, Country = m_IpPlace.Country, Latitude = m_IpPlace.Latitude, Longitude = m_IpPlace.Longitude, FromIp = true };
-            if (lang == Lang.Ko)
+            if (lang != Lang.En)
             {
                 try
                 {
-                    var local = await GeocodeAsync(m_IpPlace.Name, Lang.Ko, cancel);
+                    var local = await GeocodeAsync(m_IpPlace.Name, lang, cancel);
                     if (local != null)
                     {
                         place.Name = local.Name;
@@ -182,8 +182,8 @@ namespace VoiceAgent.Info
         public static int DayOffset(string text)
         {
             var lower = (text ?? string.Empty).ToLowerInvariant();
-            if (lower.Contains("모레") || lower.Contains("day after tomorrow")) return 2;
-            if (lower.Contains("내일") || lower.Contains("tomorrow")) return 1;
+            if (lower.Contains("모레") || lower.Contains("day after tomorrow") || lower.Contains("بعد غد")) return 2;
+            if (lower.Contains("내일") || lower.Contains("tomorrow") || lower.Contains("غدا") || lower.Contains("غدًا")) return 1;
             return 0;
         }
 
@@ -193,12 +193,17 @@ namespace VoiceAgent.Info
             if (day > 0 && f.DailyCode != null && f.DailyCode.Length > day)
             {
                 var rain = Rain(f, day);
+                if (lang == Lang.Ar)
+                    return Invariant($"{(day == 1 ? "غدًا" : "بعد غد")} في {name}: {Describe(f.DailyCode[day], lang)}، العظمى {f.DailyMax[day]:0}° والصغرى {f.DailyMin[day]:0}°.") + (rain >= 0 ? $" احتمال المطر {rain}%." : string.Empty);
                 return lang == Lang.Ko
                     ? Invariant($"{(day == 1 ? "내일" : "모레")} {name} 날씨는 {Describe(f.DailyCode[day], lang)}, 최고 {f.DailyMax[day]:0}도, 최저 {f.DailyMin[day]:0}도예요.") + (rain >= 0 ? $" 비 올 확률은 {rain}%예요." : string.Empty)
                     : Invariant($"{(day == 1 ? "Tomorrow" : "The day after tomorrow")} in {name}: {Describe(f.DailyCode[day], lang)}, high {f.DailyMax[day]:0}°, low {f.DailyMin[day]:0}°.") + (rain >= 0 ? $" {rain}% chance of rain." : string.Empty);
             }
             var today = f.DailyMax != null && f.DailyMax.Length > 0;
             var rainToday = today ? Rain(f, 0) : -1;
+            if (lang == Lang.Ar)
+                return Invariant($"الطقس الآن في {name} {Describe(f.Code, lang)}، ودرجة الحرارة {f.Temperature:0.#}°.") +
+                       (today ? Invariant($" اليوم: العظمى {f.DailyMax[0]:0}° والصغرى {f.DailyMin[0]:0}°") + (rainToday >= 0 ? $"، واحتمال المطر {rainToday}%." : ".") : string.Empty);
             if (lang == Lang.Ko)
                 return Invariant($"{InfoText.Topic(name)} 지금 {Describe(f.Code, lang)}, {f.Temperature:0.#}도예요.") +
                        (today ? Invariant($" 오늘 최고 {f.DailyMax[0]:0}도, 최저 {f.DailyMin[0]:0}도") + (rainToday >= 0 ? $"이고 비 올 확률은 {rainToday}%예요." : "예요.") : string.Empty);
@@ -215,42 +220,44 @@ namespace VoiceAgent.Info
             // UTC+9, UTC+5:30 (India), UTC+5:45 (Nepal), UTC-3:30.
             var span = TimeSpan.FromSeconds(Math.Abs(utcOffsetSeconds));
             var offset = $"UTC{(utcOffsetSeconds < 0 ? "-" : "+")}{(int)span.TotalHours}" + (span.Minutes > 0 ? $":{span.Minutes:00}" : string.Empty);
-            return lang == Lang.Ko
-                ? $"{InfoText.Topic(place.Name)} 지금 {SmartHome.FormatTime(local, Lang.Ko)}이에요 ({offset})."
-                : $"It's {SmartHome.FormatTime(local, Lang.En)} in {place.Name} ({offset}).";
+            return AppLanguage.Pick(lang,
+                $"It's {SmartHome.FormatTime(local, Lang.En)} in {place.Name} ({offset}).",
+                $"{InfoText.Topic(place.Name)} 지금 {SmartHome.FormatTime(local, Lang.Ko)}이에요 ({offset}).",
+                $"الساعة الآن {SmartHome.FormatTime(local, Lang.Ar)} في {place.Name} ({offset}).");
         }
 
-        public static string LocationReply(Place place, Lang lang) => lang == Lang.Ko
-            ? $"인터넷 IP 기준으로 {place.Country} {place.Name} 근처에 계신 것 같아요."
-            : $"Based on your IP address, you're near {place.Name}, {place.Country}.";
+        public static string LocationReply(Place place, Lang lang) => AppLanguage.Pick(lang,
+            $"Based on your IP address, you're near {place.Name}, {place.Country}.",
+            $"인터넷 IP 기준으로 {place.Country} {place.Name} 근처에 계신 것 같아요.",
+            $"بحسب عنوان IP الخاص بك، أنت بالقرب من {place.Name}، {place.Country}.");
 
         /// <summary>WMO weather interpretation codes (Open-Meteo).</summary>
         public static string Describe(int code, Lang lang)
         {
-            var (ko, en) = code switch
+            var (ko, en, ar) = code switch
             {
-                0 => ("맑음", "clear"),
-                1 => ("대체로 맑음", "mostly clear"),
-                2 => ("구름 조금", "partly cloudy"),
-                3 => ("흐림", "overcast"),
-                45 or 48 => ("안개", "foggy"),
-                51 or 53 or 55 => ("이슬비", "drizzly"),
-                56 or 57 => ("어는 이슬비", "freezing drizzle"),
-                61 => ("약한 비", "light rain"),
-                63 => ("비", "rainy"),
-                65 => ("강한 비", "heavy rain"),
-                66 or 67 => ("어는 비", "freezing rain"),
-                71 => ("약한 눈", "light snow"),
-                73 => ("눈", "snowy"),
-                75 => ("많은 눈", "heavy snow"),
-                77 => ("싸락눈", "snow grains"),
-                80 or 81 or 82 => ("소나기", "rain showers"),
-                85 or 86 => ("눈 소나기", "snow showers"),
-                95 => ("뇌우", "thunderstorms"),
-                96 or 99 => ("우박을 동반한 뇌우", "thunderstorms with hail"),
-                _ => ("알 수 없음", "unknown weather"),
+                0 => ("맑음", "clear", "صافٍ"),
+                1 => ("대체로 맑음", "mostly clear", "صافٍ في الغالب"),
+                2 => ("구름 조금", "partly cloudy", "غائم جزئيًا"),
+                3 => ("흐림", "overcast", "غائم"),
+                45 or 48 => ("안개", "foggy", "ضبابي"),
+                51 or 53 or 55 => ("이슬비", "drizzly", "رذاذ"),
+                56 or 57 => ("어는 이슬비", "freezing drizzle", "رذاذ متجمد"),
+                61 => ("약한 비", "light rain", "مطر خفيف"),
+                63 => ("비", "rainy", "ممطر"),
+                65 => ("강한 비", "heavy rain", "مطر غزير"),
+                66 or 67 => ("어는 비", "freezing rain", "مطر متجمد"),
+                71 => ("약한 눈", "light snow", "ثلج خفيف"),
+                73 => ("눈", "snowy", "مثلج"),
+                75 => ("많은 눈", "heavy snow", "ثلج كثيف"),
+                77 => ("싸락눈", "snow grains", "حبيبات ثلج"),
+                80 or 81 or 82 => ("소나기", "rain showers", "زخات مطر"),
+                85 or 86 => ("눈 소나기", "snow showers", "زخات ثلج"),
+                95 => ("뇌우", "thunderstorms", "عواصف رعدية"),
+                96 or 99 => ("우박을 동반한 뇌우", "thunderstorms with hail", "عواصف رعدية مع برد"),
+                _ => ("알 수 없음", "unknown weather", "طقس غير معروف"),
             };
-            return lang == Lang.Ko ? ko : en;
+            return AppLanguage.Pick(lang, en, ko, ar);
         }
     }
 }

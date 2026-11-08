@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -6,7 +7,7 @@ namespace VoiceAgent.UI
     /// <summary>One pipeline stage in the timing panel: name, duration and a waterfall bar on the shared time axis.</summary>
     public sealed class TimingRow : MonoBehaviour
     {
-        [SerializeField] Text m_Label, m_Value;
+        [SerializeField] TMP_Text m_Label, m_Value;
         [SerializeField] Image m_Fill;
         [SerializeField] CanvasGroup m_Group;
 

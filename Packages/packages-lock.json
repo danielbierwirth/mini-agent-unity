@@ -1,5 +1,12 @@
 {
   "dependencies": {
+    "com.nosuchstudio.rtltmpro": {
+      "version": "https://github.com/hk1ll3r/RTLTMPro.git?path=/UPMPackage",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {},
+      "hash": "375f55b139132d7099c0dd27a06112f3b24e4a4e"
+    },
     "com.sky-kim.functiongemma-home": {
       "version": "https://huggingface.co/Sky-Kim/com.sky.sentis.functiongemma.home.git",
       "depth": 0,

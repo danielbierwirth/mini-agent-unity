@@ -11,7 +11,8 @@ namespace VoiceAgent
     /// Supertonic 3 synthesis + playback on one AudioSource, sentence by sentence. A new Speak supersedes the previous one:
     /// it waits for a synthesis in flight (Supertonic's workers run one at a time) and the old reply's remaining sentences
     /// are dropped. The language follows the
-    /// text: Korean when at least 30% of its letters are Hangul (an answer to a Korean question), otherwise English.
+    /// text: Korean when at least 30% of its letters are Hangul, Arabic when at least 30% are Arabic letters (Supertonic's
+    /// &lt;ar&gt; tag, as in supertonic3-unity; digits become Arabic-Indic so numbers are read in Arabic), otherwise English.
     /// </summary>
     [RequireComponent(typeof(AudioSource))]
     public sealed class SpeechOutput : MonoBehaviour
@@ -64,7 +65,7 @@ namespace VoiceAgent
                 voice ??= Voice;
                 var sentences = Sentences(text);
                 var clock = System.Diagnostics.Stopwatch.StartNew();
-                var pcm = await Synthesize(ForSpeech(sentences[0]), language, voice);
+                var pcm = await Synthesize(ForSpeech(sentences[0], language), language, voice);
                 LastSynthesisMs = clock.Elapsed.TotalMilliseconds;
                 // Also stops here after OnDestroy, which bumps the request.
                 if (request != m_Request) return;
@@ -92,7 +93,7 @@ namespace VoiceAgent
             {
                 for (var i = 1; i < sentences.Count; i++)
                 {
-                    var pcm = await Synthesize(ForSpeech(sentences[i]), language, voice);
+                    var pcm = await Synthesize(ForSpeech(sentences[i], language), language, voice);
                     if (request != m_Request) return;
                     while (m_Source.isPlaying)
                     {
@@ -137,18 +138,19 @@ namespace VoiceAgent
 
         // A sentence ends at . ! ? (or their full-width forms and …) followed by whitespace, or at a line break, so
         // decimals like 3.5 stay whole.
-        static readonly Regex SentenceEnd = new(@"(?<=[.!?。！？…])\s+|\n+");
+        static readonly Regex SentenceEnd = new(@"(?<=[.!?。！？…؟۔])\s+|\n+");
 
         /// <summary>
         /// The sentence as Supertonic gets it: ending in ".." (a closing period becomes "..", a sentence with no closing
         /// mark gets one), which gave the cleaner sentence endings. Questions and exclamations keep their mark for the
         /// intonation.
         /// </summary>
-        public static string ForSpeech(string sentence)
+        public static string ForSpeech(string sentence, SupertonicLanguage language = SupertonicLanguage.en)
         {
             var s = sentence.TrimEnd();
-            if (s.Length == 0 || "?!？！…".IndexOf(s[^1]) >= 0) return s;
-            return s.TrimEnd('.', '。') + "..";
+            if (language == SupertonicLanguage.ar) s = ArabicText.ToArabicDigits(s);
+            if (s.Length == 0 || "?!？！…؟".IndexOf(s[^1]) >= 0) return s;
+            return s.TrimEnd('.', '。', '۔') + "..";
         }
 
         public static List<string> Sentences(string text)
@@ -162,14 +164,26 @@ namespace VoiceAgent
 
         public static SupertonicLanguage LanguageOf(string text)
         {
-            int hangul = 0, letters = 0;
+            int hangul = 0, arabic = 0, letters = 0;
             foreach (var c in text)
             {
                 if (!char.IsLetter(c)) continue;
                 letters++;
                 if (c >= '가' && c <= '힣') hangul++;
+                else if (ArabicText.IsArabicLetter(c)) arabic++;
             }
+            if (letters > 0 && arabic * 10 >= letters * 3) return SupertonicLanguage.ar;
             return letters > 0 && hangul * 10 >= letters * 3 ? SupertonicLanguage.ko : SupertonicLanguage.en;
+        }
+
+        /// <summary>Synthesizes the whole text in its language without playing it (tests: speech → STT round trips).</summary>
+        public async Awaitable<(float[] Pcm, int SampleRate)> SynthesizeClip(string text)
+        {
+            if (!IsLoaded) return (System.Array.Empty<float>(), 0);
+            var language = LanguageOf(text);
+            var pcm = new List<float>();
+            foreach (var sentence in Sentences(text)) pcm.AddRange(await Synthesize(ForSpeech(sentence, language), language, Voice));
+            return (pcm.ToArray(), m_Tts.SampleRate);
         }
 
         public void Stop()

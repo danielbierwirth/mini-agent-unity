@@ -17,7 +17,7 @@ namespace VoiceAgent.UI
             new(0.35f, 0.8f, 0.8f), new(0.62f, 0.52f, 1f), new(1f, 0.7f, 0.3f), new(0.45f, 0.88f, 0.55f),
         };
 
-        [SerializeField] Text m_Index, m_Utterance, m_Expected, m_Listening, m_Verdict, m_Total, m_AxisStart, m_AxisMid, m_AxisEnd;
+        [SerializeField] TMPro.TMP_Text m_Index, m_Utterance, m_Expected, m_Listening, m_Verdict, m_Total, m_AxisStart, m_AxisMid, m_AxisEnd;
         [SerializeField] TimingRow[] m_Rows;
 
         readonly (string Label, double Ms, double Start, bool Shown)[] m_Stages = new (string, double, double, bool)[StageNames.Length];

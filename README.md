@@ -1,6 +1,6 @@
 # mini-agent-unity
 
-An **on-device smart-home agent** built in Unity. A tiger lives in an isometric 3D home (kitchen, living room, bedroom) and you drive the house with **natural-language commands** in Korean or English, **typed or spoken**. Every command is parsed **fully on-device** by a fine-tuned **FunctionGemma-270M** model running through **Unity Sentis**; speech is transcribed on-device too. When a request isn't a home action, the agent can fall back to an LLM for a conversational reply.
+An **on-device smart-home agent** built in Unity. A tiger lives in an isometric 3D home (kitchen, living room, bedroom) and you drive the house with **natural-language commands** in English, Korean or Arabic, **typed or spoken**. Every command is parsed **fully on-device** by a fine-tuned **FunctionGemma-270M** model running through **Unity Sentis**; speech is transcribed on-device too. When a request isn't a home action, the agent can fall back to an LLM for a conversational reply.
 
 The project also contains **Nova**, the voice-agent demo from [voice-agent-unity](#-voice-agent-demo-scene-nova), as a second scene. A button switches between the two.
 
@@ -9,7 +9,7 @@ The project also contains **Nova**, the voice-agent demo from [voice-agent-unity
 ## ✨ Highlights
 * **On-device function calling:** a 270M model turns a sentence into a validated tool call locally.
 * **Voice input:** tap **Mic** and speak; Silero VAD + SenseVoice transcribe on-device and the transcript runs the same turn as a typed command.
-* **Bilingual & multi-intent:** Korean and English, including compound commands like `거실 불 켜고 거실 티비 켜줘`.
+* **Three languages & multi-intent:** English, Korean and Arabic (EN / KR / AR toggle in both scenes), including compound commands like `거실 불 켜고 거실 티비 켜줘` or `شغّل التلفاز وأطفئ ضوء المطبخ`.
 * **Embodied:** the tiger walks to the target device, *then* acts; replies appear in a speech bubble over its head.
 * **Hybrid:** a schema gate validates every call; anything that isn't a valid home action defers to an optional LLM (local or cloud, via Ollama).
 * **Two agents, one project:** switch to the Nova voice-agent demo scene and back with one button.
@@ -68,7 +68,7 @@ Rooms: **kitchen**, **living room**, **bedroom** (room-less commands resolve to 
 Two paths reach the LLM: **(1)** when no valid tool call is produced, the whole turn falls back to it for a conversational reply; **(2)** `web_search` fetches results on-device and then asks the LLM to synthesize a grounded answer. Everything else (all device control) stays fully on-device and offline.
 
 **0. Voice input: `VoiceCommandInput.cs` (optional second input)**
-Tap **Mic** next to the command field. The microphone (16 kHz) feeds Silero VAD, which opens an utterance when you start talking and closes it after 0.7 s of silence; SenseVoice-Small transcribes it, with live partial transcripts shown in the command field. English and Korean are detected per utterance. The final transcript goes to `HomeAgentConnector.SubmitTranscript`, the same turn a typed command runs, so there is still **one agent**. A transcript that arrives while a turn is running waits for it to finish. The speech models load after the agent has warmed up. `InjectTranscript(string)` feeds a transcript through the same path without a microphone (for testing).
+Tap **Mic** next to the command field. The microphone (16 kHz) feeds Silero VAD, which opens an utterance when you start talking and closes it after 0.7 s of silence; SenseVoice-Small transcribes it in the selected language (English or Korean), with live partial transcripts shown in the command field. Arabic, which SenseVoice can't transcribe, goes to Whisper-base when the utterance ends (no partials). The final transcript goes to `HomeAgentConnector.SubmitTranscript`, the same turn a typed command runs, so there is still **one agent**. A transcript that arrives while a turn is running waits for it to finish. The speech models load after the agent has warmed up. `InjectTranscript(string)` feeds a transcript through the same path without a microphone (for testing).
 
 **1. On-device inference: `FunctionGemmaGenerator` (Unity package `com.sky-kim.functiongemma-home`)**
 The model is FunctionGemma-270M-it (Gemma3 architecture: 18 layers, multi-query attention with a single KV head, head-dim 256, 262 144-token vocab, `gelu_pytorch_tanh`, 512-token sliding-attention window). It runs in Unity Sentis (`com.unity.ai.inference`) on the `GPUCompute` backend (measured ~2× faster than CPU Burst, token-identical). Because Sentis has no built-in KV cache, the cache is managed manually as plain graph I/O:
@@ -129,6 +129,15 @@ Ollama cloud models such as `gpt-oss:120b-cloud` also work through the same daem
 
 Any OpenAI-compatible endpoint works; point it wherever you like, or disable it entirely.
 
+## 🌐 Languages (EN / KR / AR)
+The **EN / 한국어 / العربية** toggle (top bar, both scenes) sets one shared language (`AppLanguage`, kept in PlayerPrefs). Switching takes effect on the next turn, without reloading the scene:
+
+* **Speech to text:** the selected language is passed to the model explicitly. SenseVoice-Small handles English and Korean; it has no Arabic, so Arabic goes to **Whisper** (multilingual) with the `<|ar|>` token. Whisper isn't in git: run **VoiceAgent ▸ Speech ▸ Download Whisper Tiny / Base / Small** once (writes 114 / 194 / 543 MB to `StreamingAssets/Whisper/<size>`); `ModelRoots.WhisperSize` picks the one Arabic uses (default **base**; only that one is needed). [Docs/stt-roundtrip.md](Docs/stt-roundtrip.md) compares the sizes on the EN / KR / AR test phrases.
+* **Understanding:** FunctionGemma and Nova's Decision AI head were trained on English and Korean only, so an Arabic command is first rewritten to the English command it means (`ArabicCommands`: `أطفئ أضواء المطبخ` → `turn off the kitchen light`). Tool names, arguments and device IDs stay English; English, Korean and Arabic device and room names all land on the same IDs. Arabic that isn't a home or info command goes to the chat model (Gemma3 for Nova, the LLM fallback for Tiger).
+* **Replies:** device replies, persona lines and info answers are in the selected language (`AgentReplies`, `Commands.json` / `Persona.json` `_ko` / `_ar` fields); the chat models are told to answer in it.
+* **Speech output (Nova):** Supertonic 3 speaks Arabic replies with its `<ar>` language tag, the same way supertonic3-unity does: NFKD normalization and a character-level `unicode_indexer`, no phonemizer, language-independent voice styles. Digits become Arabic-Indic before synthesis.
+* **Text:** every text is an RTL Text Mesh Pro component (`AutoRtlText`, RTLTMPro 4.0.0 from `https://github.com/hk1ll3r/RTLTMPro.git?path=/UPMPackage`) on TMP's LiberationSans SDF, with **Noto Sans KR** (dynamic) and **Noto Sans Arabic** (static 1024² atlas baked from RTLTMPro's `ArabicAll.txt`) as fallbacks. Force Fix turns on only for text that contains Arabic, so mixed Arabic + English + numbers render right-to-left in the right order while English and Korean stay on TMP's normal path; Preserve Numbers is on; Farsi is off.
+
 ## 🗂 Project structure
 ```
 Assets/
@@ -153,7 +162,9 @@ Assets/
 │  ├─ MiniAgentScene.unity        # Tiger (startup scene)
 │  └─ VoiceAgentDemo.unity        # Nova
 ├─ VoiceAgent/                    # Nova from voice-agent-unity (Runtime, UI, Resources, Editor)
-│  └─ Runtime/Audio/              # VoiceInput, MicrophoneStream, SpeechLanguage: shared by both scenes
+│  ├─ Runtime/Audio/              # VoiceInput, MicrophoneStream, SpeechLanguage, WhisperRecognizer: shared by both scenes
+│  └─ Runtime/Language/           # AppLanguage, LanguageToggle, ArabicCommands, ArabicText, AutoRtlText
+├─ Fonts/                         # Noto Sans KR / Arabic + TMP font assets (fallbacks of LiberationSans SDF)
 ├─ StreamingAssets/Intent/        # Nova's trained Decision AI head
 ├─ Materials/Mat_TransparentVariant.mat  # keeps the transparent URP Lit variant in player builds
 └─ Resources/Music/              # jazz.wav / lofi.wav / rock.wav (synthesized loops)

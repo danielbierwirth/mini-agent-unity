@@ -25,12 +25,21 @@ namespace VoiceAgent
         /// <summary>StreamingAssets-relative list of the files a player copies out on Android, one "path\tbytes" per line.</summary>
         public const string ManifestFile = "voiceagent_files.txt";
         const string IntentHeadFile = "Intent/decision_ai_head.sentis";
+        const string WhisperFolder = "Whisper";
 
         public static string Vad => Package(VadPackage);
         public static string Stt => Package(SttPackage);
         public static string Tts => Package(TtsPackage);
         public static string Gemma => Package(GemmaPackage);
         /// <summary>The trained Decision AI head graph (VoiceAgent/Train Command Head).</summary>
+        /// <summary>
+        /// The Whisper size used for Arabic speech: "tiny", "base" or "small". base recovered more Arabic commands than
+        /// tiny at ~1.6x its time, and as many as small at a third of small's time (Docs/stt-roundtrip.md).
+        /// </summary>
+        public static string WhisperSize = "base";
+        /// <summary>The selected Whisper's folder (VoiceAgent ▸ Speech ▸ Download Whisper … writes it; not in git).</summary>
+        public static string Whisper => WhisperFor(WhisperSize);
+        public static string WhisperFor(string size) => Path.Combine(Application.isEditor ? Application.streamingAssetsPath : RuntimeRoot, WhisperFolder, size);
         public static string IntentHead => Path.Combine(Application.isEditor ? Application.streamingAssetsPath : RuntimeRoot, IntentHeadFile);
 
         /// <summary>True where StreamingAssets is a URL inside the app package (Android) instead of a folder.</summary>
