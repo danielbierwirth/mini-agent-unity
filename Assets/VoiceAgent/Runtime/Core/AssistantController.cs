@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using SentisModels;
 using VoiceAgent.Info;
 using VoiceAgent.UI;
@@ -105,7 +106,16 @@ namespace VoiceAgent
                 m_View.SetChips(null);
                 return null;
             }
-            var top = Ranking.Top(m_Catalog, m_Ranker.Score(ArabicCommands.ForModel(text)), m_View.MaxChips);
+            var rewrite = ArabicText.ContainsArabic(text) ? ArabicCommands.ToEnglish(text) : null;
+            var top = Ranking.Top(m_Catalog, m_Ranker.Score(rewrite ?? text), m_View.MaxChips);
+            // The Arabic rules have already recognised a question about the world; the English-trained head can still
+            // score "search the web for <Arabic words>" as chat ("كيف تعمل الطائرة؟"), so the rules decide.
+            if (rewrite != null && rewrite.StartsWith(ArabicCommands.SearchPrefix, System.StringComparison.Ordinal) && m_Catalog.IndexOf(CommandCatalog.WebSearch) >= 0)
+            {
+                top.RemoveAll(r => r.Command.id == CommandCatalog.WebSearch);
+                top.Insert(0, new RankedCommand(m_Catalog[CommandCatalog.WebSearch], 1f));
+                if (top.Count > m_View.MaxChips) top.RemoveRange(m_View.MaxChips, top.Count - m_View.MaxChips);
+            }
             m_View.SetChips(top);
             return top;
         }
@@ -295,12 +305,22 @@ namespace VoiceAgent
                 UnityEngine.Debug.Log($"[Turn] Gemma answered outside Arabic, replaced: {answer}");
                 answer = null;
             }
+            // Gemma3-270M sometimes just repeats the question ("أين يقع لبنان؟" → "أين يقع لبنان؟"): that is no answer.
+            if (answer != null && Comparable(answer) == Comparable(text))
+            {
+                UnityEngine.Debug.Log($"[Turn] Gemma repeated the question, replaced: {answer}");
+                answer = null;
+            }
             if (string.IsNullOrWhiteSpace(answer)) answer = m_Persona.NotSure(AppLanguage.Current);
             answer = prefix + answer;
             ActionDone(prefix.Length > 0 ? "Action / search + Gemma3" : "Action / Gemma3 reply");
             m_View.UpdateMessage(bubble, answer);
             await Speak(answer);
         }
+
+        /// <summary>Text reduced to its letters and digits, lower-cased, with Arabic letter variants folded together.</summary>
+        static string Comparable(string text) =>
+            new string(ArabicText.Normalize(text).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
         /// <summary>The reply text is ready: records the action stage.</summary>
         void ActionDone(string label)

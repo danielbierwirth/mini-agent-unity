@@ -19,6 +19,9 @@ namespace VoiceAgent
     /// </summary>
     public static class ArabicCommands
     {
+        /// <summary>How a web search rewrite starts ("search the web for لبنان").</summary>
+        public const string SearchPrefix = "search the web for";
+
         static readonly string[] OnVerbs = { "شغل", "تشغيل", "اشعل", "شعل", "ولع", "افتح", "فتح", "اضي", "انر", "نور", "ابدا", "شغلي", "دور", "ادر", "اعزف" };
         static readonly string[] OffVerbs = { "اطفي", "اطف", "طفي", "اطفا", "اغلق", "اغلاق", "سكر", "قفل", "اقفل", "اوقف", "وقف", "ايقاف", "اسكت", "اوقفي", "طفيه" };
         static readonly string[] UpVerbs = { "ارفع", "رفع", "زد", "زيد", "زود", "كبر" };
@@ -178,7 +181,9 @@ namespace VoiceAgent
                 return on || genre != null ? (genre != null ? $"play {genre} music" : "play music") : null;
             }
             if (Any(words, VacuumWords)) return off ? "stop the robot vacuum" : "start the robot vacuum";
-            if (Any(words, LightWords) || color != null || room != null)
+            // A colour alone is no light command ("ليه السما زرقا؟" is "why is the sky blue?"): it needs a light word, a
+            // room, or a verb that sets or switches something.
+            if (Any(words, LightWords) || room != null || (color != null && (set || on)))
             {
                 if (color != null && !off) return $"change the {roomPart}light to {color}";
                 if (off) return $"turn off the {roomPart}light";
@@ -206,14 +211,54 @@ namespace VoiceAgent
                 var city = Place(words);
                 return city != null ? $"what time is it in {city}" : "what time is it";
             }
-            if (Any(words, new[] { "اخبار", "خبر" }))
+            // Questions about Nova ("كيف حالك", "كم عمرك", "ما رأيك", "كيف أخبارك") are conversation, never a search.
+            if (words.Any(w => Forms(w).Any(f => Personal.Any(p => Cue(p) == f)))) return null;
+            // News: the noun itself ("أخبار", "خبر", "الأخبار"), not the verb "خبرني" (tell me), which is a search.
+            if (words.Any(w => Forms(w).Any(f => f == Cue("خبر") || f.StartsWith(Cue("اخبار"), StringComparison.Ordinal))))
                 return $"latest news about {Topic(words)}".TrimEnd();
             // "ما هو مستوى الصوت" is a volume question, not a search: device words leave it to the command rules.
             var device = Any(words, LightWords) || Any(words, TvWords) || Any(words, ComputerWords) || Any(words, VacuumWords) || Any(words, MusicWords) || Any(words, VolumeWords);
             if (device) return null;
-            if (Any(words, new[] { "ابحث", "بحث" }) || Has("من هو") || Has("من هي") || Has("ما هو") || Has("ما هي") || words.Contains("متي"))
-                return $"search the web for {Topic(words)}".TrimEnd();
+            if (IsSearch(words) || Has("من هو") || Has("من هي") || Has("ما هو") || Has("ما هي"))
+                return $"{SearchPrefix} {Topic(words)}".TrimEnd();
             return null;
+        }
+
+        /// <summary>Second-person and small-talk words: a question holding one is about Nova, not the world.</summary>
+        static readonly string[] Personal =
+        {
+            "حالك", "حالكم", "كيفك", "كيفكم", "شلونك", "شلونكم", "ازيك", "ازيكم", "عامل", "عامله", "اخبارك", "اخباركم",
+            "عمرك", "رايك", "رايكم", "تحبني", "تحب", "تحبين", "انت", "انتي", "اسمك", "صحتك", "يومك", "نفسك",
+        };
+
+        /// <summary>
+        /// Question words that ask about the world, in Modern Standard Arabic and the common dialects (Gulf, Levantine,
+        /// Egyptian), as Whisper writes them after <see cref="ArabicText.Normalize"/>: أين/وين/فين, ماذا/شو/إيش/إيه,
+        /// لماذا/ليش/ليه, مين, كم/قديش/كام, متى/إمتى, كيف/ازاي, أي, هل.
+        /// </summary>
+        static readonly string[] QuestionWords =
+        {
+            "اين", "وين", "فين", "ماذا", "شو", "ايش", "ايه", "لماذا", "ليش", "ليه", "مين", "كم", "قديش", "كام",
+            "متي", "امتي", "كيف", "ازاي", "اي", "هل",
+        };
+
+        /// <summary>Requests for information: "ابحث عن", "أخبرني عن", "حدثني عن", "اشرح", "عرّف", "معلومات عن", "جوجل".</summary>
+        static readonly string[] SearchWords =
+        {
+            "ابحث", "بحث", "فتش", "اخبرني", "خبرني", "حدثني", "احكيلي", "اشرح", "اشرحلي", "عرف", "تعريف", "معلومات", "جوجل", "غوغل", "قوقل",
+        };
+
+        static bool IsSearch(List<string> words)
+        {
+            if (words.Count == 0) return false;
+            if (words.Any(w => QuestionWords.Contains(w) || SearchWords.Contains(w))) return true;
+            // "دوّر على" (look for): دوّر alone is also "turn on", which the command rules read.
+            for (var i = 0; i + 1 < words.Count; i++)
+                if (words[i] == "دور" && words[i + 1] == "علي") return true;
+            // "ما" and "من" open a question at the start of the sentence ("ما عاصمة فرنسا؟", "من مخترع الهاتف؟");
+            // inside it they are "not" and "from". "من فضلك" (please) is not "who".
+            if (words[0] is "ما" or "ماهو" or "ماهي") return true;
+            return words[0] == "من" && (words.Count < 2 || words[1] != "فضلك");
         }
 
         /// <summary>The place after في ("in"), as an English name when it is a known city, otherwise as written.</summary>
@@ -231,10 +276,19 @@ namespace VoiceAgent
             return place.Count > 0 ? string.Join(" ", place) : null;
         }
 
-        static readonly string[] TopicStops = { "ابحث", "بحث", "عن", "في", "من", "هو", "هي", "ما", "ماذا", "متي", "اخبار", "خبر", "اخر", "اخبرني", "قل", "لي", "الانترنت", "الويب", "اليوم", "عن" };
+        static readonly string[] TopicStops = { "ابحث", "بحث", "عن", "في", "من", "هو", "هي", "ما", "ماذا", "متي", "اخبار", "خبر", "اخر", "اخبرني", "قل", "لي", "الانترنت", "الويب", "اليوم", "عن", "اين", "لماذا", "كم", "يقع", "تقع", "يوجد", "توجد",
+            "وين", "فين", "شو", "ايش", "ايه", "ليش", "ليه", "مين", "قديش", "كام", "امتي", "كيف", "ازاي", "اي", "هل", "الذي", "التي",
+            "فتش", "خبرني", "حدثني", "احكيلي", "اشرح", "اشرحلي", "عرف", "تعريف", "معلومات", "جوجل", "غوغل", "قوقل" };
 
         /// <summary>A search topic: the words left after the question and search words ("ابحث عن آلان تورنغ" → "الان تورنغ").</summary>
-        public static string Topic(List<string> words) => string.Join(" ", words.Where(w => !IsTopicStop(w)));
+        public static string Topic(List<string> words) => string.Join(" ", words.Where((w, i) => !IsTopicStop(words, i)));
+
+        /// <summary>Whether normalized word <paramref name="i"/> is a question or search word; "دوّر على" (look for) as a pair, since دور alone
+        /// is also "role" and على is also the name Ali.</summary>
+        static bool IsTopicStop(List<string> normalized, int i) =>
+            IsTopicStop(normalized[i]) ||
+            (normalized[i] == "دور" && i + 1 < normalized.Count && normalized[i + 1] == "علي") ||
+            (normalized[i] == "علي" && i > 0 && normalized[i - 1] == "دور");
 
         static bool IsTopicStop(string normalizedWord) => Forms(normalizedWord).Any(f => TopicStops.Contains(f));
 
@@ -242,7 +296,8 @@ namespace VoiceAgent
         public static string SearchTopic(string text)
         {
             var original = Regex.Split(text ?? string.Empty, @"[\s\?\!\.,;:؟،]+").Where(t => t.Length > 0).ToList();
-            var kept = original.Where(w => !IsTopicStop(ArabicText.Normalize(w))).ToList();
+            var normalized = original.Select(ArabicText.Normalize).ToList();
+            var kept = original.Where((w, i) => !IsTopicStop(normalized, i)).ToList();
             return kept.Count > 0 ? string.Join(" ", kept) : text?.Trim();
         }
     }
