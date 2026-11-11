@@ -12,7 +12,8 @@ namespace VoiceAgent
     /// it waits for a synthesis in flight (Supertonic's workers run one at a time) and the old reply's remaining sentences
     /// are dropped. The language follows the
     /// text: Korean when at least 30% of its letters are Hangul, Arabic when at least 30% are Arabic letters (Supertonic's
-    /// &lt;ar&gt; tag, as in supertonic3-unity; digits become Arabic-Indic so numbers are read in Arabic), otherwise English.
+    /// &lt;ar&gt; tag, as in supertonic3-unity; numbers are spelled out as Arabic words, which Supertonic reads where it
+    /// can't read digits), otherwise English.
     /// </summary>
     [RequireComponent(typeof(AudioSource))]
     public sealed class SpeechOutput : MonoBehaviour
@@ -148,7 +149,7 @@ namespace VoiceAgent
         public static string ForSpeech(string sentence, SupertonicLanguage language = SupertonicLanguage.en)
         {
             var s = sentence.TrimEnd();
-            if (language == SupertonicLanguage.ar) s = ArabicText.ToArabicDigits(s);
+            if (language == SupertonicLanguage.ar) s = ArabicNumbers.Speakable(s);
             if (s.Length == 0 || "?!？！…؟".IndexOf(s[^1]) >= 0) return s;
             return s.TrimEnd('.', '。', '۔') + "..";
         }

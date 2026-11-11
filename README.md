@@ -124,6 +124,20 @@ Both scenes use one language model, through the shared `LlmClient` (`Assets/Voic
 * **Chat:** anything that isn't a command. Tiger answers as Tiger, Nova as Nova (`Persona.json`); without the model Nova falls back to Gemma3 on-device and Tiger says it can't help.
 * Weather, time, location and device replies stay fixed templates, so they don't need the model.
 
+### Setup (Ollama + Qwen)
+1. Install [Ollama](https://ollama.com/download) (macOS / Windows app, or `curl -fsSL https://ollama.com/install.sh | sh` on Linux; on macOS also `brew install ollama`). qwen3.5 needs a recent version, so update an older install.
+2. Start the server: open the Ollama app, or run `ollama serve` in a terminal. It listens on `http://localhost:11434`.
+3. Pull the model (a several-GB download, once):
+   ```sh
+   ollama pull qwen3.5:9b
+   ```
+4. Check that it answers:
+   ```sh
+   ollama run qwen3.5:9b "Say hi in one word."
+   curl http://localhost:11434/v1/models   # qwen3.5:9b should be listed
+   ```
+5. Press **Play**. The defaults below already point at this server and model, so nothing needs to change in the scenes. If the server isn't running, web answers fall back to the best-ranked sentence and chat falls back as described above.
+
 Configured on `HomeAgentConnector` (MiniAgentScene) and `VoiceAgentDemoScene` (VoiceAgentDemo), with the same defaults; an empty endpoint on Nova, or `Use Cloud Fallback` off on Tiger, turns it off. Each scene sends a one-token warm-up request at start so the first answer doesn't wait for Ollama to load the model.
 
 * **Endpoint:** `http://localhost:11434/v1/chat/completions`: an [Ollama](https://ollama.com) server on the same machine.
@@ -145,7 +159,7 @@ The **EN / 한국어 / العربية** toggle (top bar, both scenes) sets one s
 * **Choosing the Arabic model:** the **Arabic Speech** dropdown on `VoiceAgentDemoScene` (Nova) and on `VoiceCommandInput` (Tiger) picks Whisper small with Arabic dialects (the default), small, base or tiny; only the chosen one needs to be installed, and a player build ships every size in `StreamingAssets/Whisper`, so delete the ones you don't use before building. [Docs/stt-roundtrip.md](Docs/stt-roundtrip.md) compares the sizes on the EN / KR / AR test phrases.
 * **Understanding:** FunctionGemma and Nova's Decision AI head were trained on English and Korean only, so an Arabic command is first rewritten to the English command it means (`ArabicCommands`: `أطفئ أضواء المطبخ` → `turn off the kitchen light`). Tool names, arguments and device IDs stay English; English, Korean and Arabic device and room names all land on the same IDs. Arabic questions (أين، ما، من، كيف، هل … and the Gulf, Levantine and Egyptian forms وين، شو، ليش، مين …) go to the web search; other Arabic that isn't a command goes to chat. Commands accept the dialect verbs too: ولّع / شعّل / ضوّي (switch on), طفّي / سكّر / بطّل (switch off, stop), حطّ (put on: music, the TV), بدي / عايز / ابغى اسمع (I want to listen to), علّي / زوّد (louder), وطّي / هدّي (quieter), and شو / قديش / الساعة كام (what time is it), وين أنا (where am I), مين انت / شو اسمك (who are you).
 * **Replies:** device replies, persona lines and info answers are in the selected language (`AgentReplies`, `Commands.json` / `Persona.json` `_ko` / `_ar` fields); the chat models are told to answer in it.
-* **Speech output (both scenes):** Supertonic 3 speaks Arabic replies with its `<ar>` language tag, the same way supertonic3-unity does: NFKD normalization and a character-level `unicode_indexer`, no phonemizer, language-independent voice styles. Digits become Arabic-Indic before synthesis.
+* **Speech output (both scenes):** Supertonic 3 speaks Arabic replies with its `<ar>` language tag, the same way supertonic3-unity does: NFKD normalization and a character-level `unicode_indexer`, no phonemizer, language-independent voice styles. Supertonic doesn't read digits in Arabic, so numbers are spelled out as Arabic words before synthesis (`ArabicNumbers`: `30%` → ثلاثون بالمئة, `3:05` → الثالثة وخمس دقائق, `22.5°` → اثنان وعشرون فاصلة خمسة درجة); the on-screen text keeps the digits.
 * **Text:** every text is an RTL Text Mesh Pro component (`AutoRtlText`, RTLTMPro 4.0.0 from `https://github.com/hk1ll3r/RTLTMPro.git?path=/UPMPackage`) on TMP's LiberationSans SDF, with **Noto Sans KR** (dynamic) and **Noto Sans Arabic** (static 1024² atlas baked from RTLTMPro's `ArabicAll.txt`) as fallbacks. Force Fix turns on only for text that contains Arabic, so mixed Arabic + English + numbers render right-to-left in the right order while English and Korean stay on TMP's normal path; Preserve Numbers is on; Farsi is off.
 
 ## 🗂 Project structure
@@ -188,9 +202,10 @@ com.sky.sentis.silero-vad / sensevoice / gemma3-270m-it / supertonic (git packag
 1. Install [git-lfs](https://git-lfs.com) (the model packages store their models with LFS).
 2. Open the project in **Unity 6000.6.5f1** (URP).
 3. Wait for the Package Manager to resolve the packages; the first time it downloads the FunctionGemma model (about 436 MB) and the speech, Gemma3 and Supertonic models (about 1.4 GB).
-4. Open `Assets/Scenes/MiniAgentScene.unity` and press **Play**.
-5. Type a command in the on-screen input box and send it, tap **Mic** and say it, or move the tiger with `W` `A` `S` `D`.
-6. Press **Voice Agent** (top-left) to switch to Nova, and **Mini Agent** to come back.
+4. Optional: install Ollama and pull `qwen3.5:9b` for web answers and chat (see [Setup (Ollama + Qwen)](#setup-ollama--qwen)).
+5. Open `Assets/Scenes/MiniAgentScene.unity` and press **Play**.
+6. Type a command in the on-screen input box and send it, tap **Mic** and say it, or move the tiger with `W` `A` `S` `D`.
+7. Press **Voice Agent** (top-left) to switch to Nova, and **Mini Agent** to come back.
 
 The microphone needs permission on first use (macOS asks for the Editor or the player; iOS shows "Tiger listens to your voice commands.").
 

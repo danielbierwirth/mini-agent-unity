@@ -2,7 +2,7 @@ using System.Text;
 
 namespace VoiceAgent
 {
-    /// <summary>Arabic script helpers: detection, a matching form for keyword rules, and digit conversion.</summary>
+    /// <summary>Arabic script helpers: detection and a matching form for keyword rules.</summary>
     public static class ArabicText
     {
         /// <summary>Arabic letters (base block, extended blocks and presentation forms), not Arabic digits or punctuation.</summary>
@@ -62,20 +62,6 @@ namespace VoiceAgent
                     default: sb.Append(char.ToLowerInvariant(c)); continue;
                 }
             }
-            return sb.ToString();
-        }
-
-        /// <summary>0–9 → ٠–٩ and % → ٪, for text Supertonic reads in Arabic, so numbers are read as Arabic numbers rather than English ones.</summary>
-        public static string ToArabicDigits(string text)
-        {
-            var sb = new StringBuilder((text ?? string.Empty).Length);
-            foreach (var c in text ?? string.Empty)
-                sb.Append(c switch
-                {
-                    >= '0' and <= '9' => (char)('٠' + (c - '0')),
-                    '%' => '٪',
-                    _ => c,
-                });
             return sb.ToString();
         }
     }
