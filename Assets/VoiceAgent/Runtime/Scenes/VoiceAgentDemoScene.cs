@@ -20,6 +20,8 @@ namespace VoiceAgent.Scenes
         [SerializeField] ProceduralMusic m_Music;
         [SerializeField] SpeechOutput m_Speech;
         [SerializeField] TimingPanel m_Timing;
+        [Tooltip("The speech-to-text model for Arabic (VoiceAgent ▸ Speech installs each). The dialect model is whisper-small fine-tuned on 13 Arabic dialects.")]
+        [SerializeField] ArabicWhisper m_ArabicSpeech = ArabicWhisper.Small;
 
         [Header("Language model (OpenAI-compatible chat completions; empty endpoint = on-device Gemma3 only)")]
         [SerializeField] string m_LlmEndpoint = LlmClient.DefaultEndpoint;
@@ -77,6 +79,7 @@ namespace VoiceAgent.Scenes
             m_View.SetStatus("Warming up Gemma3 generation…");
             await m_Gemma.GenerateAsync("hi", 2);
             if (!this) return;
+            ModelRoots.WhisperSize = ModelRoots.WhisperFolderOf(m_ArabicSpeech);
             m_Voice = new VoiceInput();
             var llm = string.IsNullOrEmpty(m_LlmEndpoint) ? null : new LlmClient(m_LlmEndpoint, m_LlmModel, m_LlmReasoningEffort);
             var info = new InfoAgent(new UnityWebClient(), m_Gemma) { Writer = llm != null ? new AnswerWriter(llm) : null };

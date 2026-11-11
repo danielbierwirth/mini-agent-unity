@@ -18,6 +18,8 @@ public class VoiceCommandInput : MonoBehaviour
     [SerializeField] private Button _micButton;
     [Tooltip("Shows partial transcripts while you talk (the agent's command field).")]
     [SerializeField] private TMP_InputField _input;
+    [Tooltip("The speech-to-text model for Arabic (VoiceAgent ▸ Speech installs each). The dialect model is whisper-small fine-tuned on 13 Arabic dialects.")]
+    [SerializeField] private ArabicWhisper _arabicSpeech = ArabicWhisper.Small;
 
     [Header("Mic button colors")]
     [SerializeField] private Color _idleColor = new(0.20f, 0.55f, 0.95f);
@@ -63,6 +65,7 @@ public class VoiceCommandInput : MonoBehaviour
         }
         try
         {
+            ModelRoots.WhisperSize = ModelRoots.WhisperFolderOf(_arabicSpeech);
             m_Voice = new VoiceInput();
         }
         catch (System.Exception e)
@@ -88,7 +91,7 @@ public class VoiceCommandInput : MonoBehaviour
         {
             Debug.LogWarning(m_Voice.CanListen
                 ? "[Voice] can't listen: no microphone, or mic permission not granted yet."
-                : $"[Voice] can't listen: no speech model for {AppLanguage.Code(m_Voice.Language)} (Arabic needs VoiceAgent ▸ Speech ▸ Download Whisper {ModelRoots.WhisperSize}).");
+                : $"[Voice] can't listen: no speech model for {AppLanguage.Code(m_Voice.Language)} (Arabic needs Whisper-{ModelRoots.WhisperSize}: install it from VoiceAgent ▸ Speech).");
             return;
         }
         if (_input != null) _input.text = "";

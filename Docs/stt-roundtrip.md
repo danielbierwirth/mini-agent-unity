@@ -79,3 +79,20 @@ Whisper now gets `SpeechLanguage.ArabicPrompt` (the command words, spelled as `A
 
 * With the prompt, the transcripts mostly match the source text word for word (شغّل التلفاز, أوقف المكنسة, أطفئ نور غرفة النوم). Both models wrote قلل الصوت as "قل الصوت" and أوقف الروبوت as "الربوت"; `ArabicCommands` now reads both (only the last run, small 5/6, includes that fix). Whisper-small with the prompt is now the default.
 * **Prompt hallucination:** on silence or noise a prompted Whisper repeats prompt clauses ("شغّل الموسيقى، شغّل الموسيقى، …"). Once, base also spliced prompt clauses into real speech. `SpeechLanguage.IsHallucination` drops a transcript when a clause repeats, when it copies two or more prompt clauses verbatim, or when it holds more text than the audio's length allows. One case still gets through: base produced a single "شغّل الموسيقى." from 2 s of faint white noise. In the app, Silero VAD only passes speech to Whisper, so this test (raw noise sent straight to Whisper) is harsher than live use.
+
+## Dialect fine-tune vs. stock whisper-small (2026-11-11)
+
+`small-dialect` is [`oddadmix/whisper-small-arabic-dialectal-v2`](https://huggingface.co/oddadmix/whisper-small-arabic-dialectal-v2), whisper-small fine-tuned on 13 Arabic dialects (install: **VoiceAgent ▸ Speech ▸ Install Whisper Small (Arabic dialects)**). There are 16 phrases: the 8 MSA commands from above, 7 dialect phrases (طفي النور لو سمحت، ولّع الضو بالمطبخ، شغل التلفزيون، علّي الصوت شوي، وين لبنان؟، فين الأهرامات؟، شو أخبار الطقس اليوم؟) and one chat line. Each phrase is spoken by Supertonic (F2), transcribed, and routed with `ArabicCommands`. Two more clips are scored separately: the real recording `where_is_lebanon.mp3` and 2 s of faint white noise. CER is the character error rate after `ArabicText.Normalize`, letters only.
+
+| Model | Prompt | Routed right | CER | Avg. time | Real "أين يقع لبنان؟" | 2 s noise |
+|---|---|---|---|---|---|---|
+| whisper-small | off | 9/16 | 9.8% | 674 ms | ✅ exact | "سنقوم بعمل" |
+| whisper-small | on | 12/16 | 6.7% | 1007 ms | ✅ exact | repeats "أوقف المكنسة" 15× (dropped by the guard) |
+| small-dialect | off | 10/16 | 7.7% | 709 ms | ✅ exact | "هههه" |
+| small-dialect | on | 12/16 | **4.1%** | 1028 ms | ✅ exact | **nothing** |
+
+* **The dialect model with the prompt transcribes closest to what was said.** It got شو أخبار الطقس اليوم، فين الأهرامات، أوقف المكنسة and شغل التلفزيون letter for letter, where stock small wrote "الأحرامات" and "أخبر". It is as fast as stock small and the same size on disk.
+* **It doesn't hallucinate the prompt on noise.** Stock small with the prompt filled 2 s of noise with a repeated command, which only `SpeechLanguage.IsHallucination` stopped. The dialect model returned nothing.
+* **Most remaining misses are routing, not transcription.** `ArabicCommands` doesn't know the dialect verbs ولّع (turn on) and علّي (raise), so a correct "على الصوت شوي" still routes to chat. Both models misheard وين لبنان as "ويلبنان" / "ويا لبنان" and أوقف الروبوت as "أوف روبوت". (شو أخبار الطقس routing to the weather counts as a miss in the table, but it is a reasonable answer.)
+* **The test voice is synthetic and speaks dialect text with an MSA accent**, so these numbers understate what a dialect fine-tune should gain on real dialect speakers. A recording from a native speaker is the test that counts.
+

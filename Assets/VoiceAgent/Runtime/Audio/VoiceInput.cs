@@ -94,7 +94,7 @@ namespace VoiceAgent
             if (m_Whisper != null || m_Disposed) return;
             if (!WhisperRecognizer.Exists(ModelRoots.Whisper))
             {
-                Debug.LogWarning($"[Voice] Arabic speech needs Whisper-{ModelRoots.WhisperSize} in {ModelRoots.Whisper}: run VoiceAgent ▸ Speech ▸ Download Whisper …");
+                Debug.LogWarning($"[Voice] Arabic speech needs Whisper-{ModelRoots.WhisperSize} in {ModelRoots.Whisper}: install it from the VoiceAgent ▸ Speech menu");
                 return;
             }
             try

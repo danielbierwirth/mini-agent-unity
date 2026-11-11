@@ -33,13 +33,21 @@ namespace VoiceAgent
         public static string Gemma => Package(GemmaPackage);
         /// <summary>The trained Decision AI head graph (VoiceAgent/Train Command Head).</summary>
         /// <summary>
-        /// The Whisper size used for Arabic speech: "tiny", "base" or "small". With the command-word prompt
-        /// (SpeechLanguage.ArabicPrompt) small got every Arabic test command, base 4-5 of 5 at a third of the time
-        /// (Docs/stt-roundtrip.md).
+        /// The Whisper model used for Arabic speech, by folder: "tiny", "base", "small", or "small-dialect" (whisper-small
+        /// fine-tuned on 13 Arabic dialects). With the command-word prompt (SpeechLanguage.ArabicPrompt) small got every
+        /// Arabic test command, base 4-5 of 5 at a third of the time (Docs/stt-roundtrip.md). The scenes set it from their
+        /// Inspector option (<see cref="ArabicWhisper"/>) before creating <see cref="VoiceInput"/>.
         /// </summary>
         public static string WhisperSize = "small";
         /// <summary>The selected Whisper's folder (VoiceAgent ▸ Speech ▸ Download Whisper … writes it; not in git).</summary>
         public static string Whisper => WhisperFor(WhisperSize);
+        public static string WhisperFolderOf(ArabicWhisper model) => model switch
+        {
+            ArabicWhisper.Tiny => "tiny",
+            ArabicWhisper.Base => "base",
+            ArabicWhisper.SmallDialect => "small-dialect",
+            _ => "small",
+        };
         public static string WhisperFor(string size) => Path.Combine(Application.isEditor ? Application.streamingAssetsPath : RuntimeRoot, WhisperFolder, size);
         public static string IntentHead => Path.Combine(Application.isEditor ? Application.streamingAssetsPath : RuntimeRoot, IntentHeadFile);
 
@@ -105,5 +113,14 @@ namespace VoiceAgent
                 throw new FileNotFoundException($"{relative} is missing from StreamingAssets: {request.error}");
             return request.downloadHandler.text;
         }
+    }
+
+    /// <summary>The Whisper model Arabic speech goes to (VoiceAgent ▸ Speech ▸ Download Whisper … installs each).</summary>
+    public enum ArabicWhisper
+    {
+        [InspectorName("Whisper tiny (fastest)")] Tiny,
+        [InspectorName("Whisper base")] Base,
+        [InspectorName("Whisper small")] Small,
+        [InspectorName("Whisper small, Arabic dialects")] SmallDialect,
     }
 }
