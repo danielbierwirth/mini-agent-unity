@@ -5,8 +5,6 @@
 //   get_location-> ip-api.com (IP geolocation stand-in for GPS on desktop)
 using System;
 using System.Collections;
-using System.Globalization;
-using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
 using VoiceAgent;   // AppLanguage: replies in the selected language
@@ -60,7 +58,6 @@ namespace NeedleTest
         [Serializable] class WxResp { public Wx current_weather; }
         [Serializable] class Wx { public float temperature, windspeed; public int weathercode; }
         [Serializable] class IpResp { public string city, regionName, country, timezone; }
-        [Serializable] class DdgResp { public string AbstractText, Answer, Definition; }
 
         static IEnumerator Get(string url, Action<string> ok, Action<string> fail)
         {
@@ -177,58 +174,6 @@ namespace NeedleTest
                 },
                 e => answer = "(location API error: " + e + ")");
             done(answer);
-        }
-
-        // web_search RETRIEVAL: query DuckDuckGo (key-less Instant Answer API) and return
-        // a compact CONTEXT blob (abstract/answer/definition + a few related-topic snippets),
-        // NOT a final answer. The connector then feeds this context to the cloud LLM to
-        // SYNTHESIZE a grounded answer (retrieve-then-answer / RAG). Empty string = nothing found.
-        public static IEnumerator WebSearchRetrieve(string query, Action<string> done)
-        {
-            if (string.IsNullOrWhiteSpace(query)) { done(""); yield break; }
-            string context = "";
-            yield return Get(
-                "https://api.duckduckgo.com/?format=json&no_html=1&skip_disambig=1&q=" +
-                Uri.EscapeDataString(query),
-                t => context = ExtractDdg(t),
-                _ => context = "");
-            done(context);
-        }
-
-        // Build a short context from a DuckDuckGo Instant Answer JSON: the top abstract plus
-        // up to five related-topic snippets. JsonUtility can't parse the heterogeneous
-        // RelatedTopics array, so the snippets are pulled by scanning for "Text":"..." values.
-        static string ExtractDdg(string json)
-        {
-            var sb = new StringBuilder();
-            var d = JsonUtility.FromJson<DdgResp>(json);
-            if (d != null)
-            {
-                if (!string.IsNullOrEmpty(d.AbstractText)) sb.Append("- ").AppendLine(d.AbstractText);
-                else if (!string.IsNullOrEmpty(d.Answer)) sb.Append("- ").AppendLine(d.Answer);
-                else if (!string.IsNullOrEmpty(d.Definition)) sb.Append("- ").AppendLine(d.Definition);
-            }
-            int count = 0, i = 0;
-            while (count < 5 && (i = json.IndexOf("\"Text\":\"", i, StringComparison.Ordinal)) >= 0)
-            {
-                i += 8;
-                var val = new StringBuilder();
-                while (i < json.Length && json[i] != '"')
-                {
-                    if (json[i] == '\\' && i + 1 < json.Length)
-                    {
-                        if (json[i + 1] == 'u' && i + 5 < json.Length &&
-                            int.TryParse(json.Substring(i + 2, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int code))
-                        { val.Append((char)code); i += 6; }
-                        else { val.Append(json[i + 1]); i += 2; }
-                    }
-                    else { val.Append(json[i]); i++; }
-                }
-                var s = val.ToString().Trim();
-                if (s.Length > 0) { sb.Append("- ").AppendLine(s); count++; }
-            }
-            var ctx = sb.ToString().Trim();
-            return ctx.Length > 1500 ? ctx.Substring(0, 1500) : ctx;
         }
     }
 }

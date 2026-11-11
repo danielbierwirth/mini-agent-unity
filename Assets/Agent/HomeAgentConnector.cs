@@ -2,20 +2,23 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using NeedleTest;                 // FgCallParser, ToolCallValidator, SmartHomeTools, AgentInfoApis, AgentCloudClient
+using NeedleTest;                 // FgCallParser, ToolCallValidator, SmartHomeTools, AgentInfoApis
 using SentisSkills.Inference;     // FunctionGemmaGenerator
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using VoiceAgent;                 // AppLanguage, ArabicCommands
+using VoiceAgent;                 // AppLanguage, ArabicCommands, SpeechOutput, ModelRoots
+using VoiceAgent.Info;            // InfoAgent, AnswerWriter, LlmClient: the same web answers and language model as VoiceAgentDemo
 
 /// <summary>
 /// Model → scene connector. Turns a natural-language command into on-device tool
 /// calls (FunctionGemmaGenerator), validates them against the schema gate, and
 /// drives <see cref="HomeDeviceController"/> (Tiger walks to the room, then the
-/// device acts). Info tools hit live APIs; anything the model can't handle is
-/// escalated to the cloud (Ollama) instead of dead-ending on a refusal.
+/// device acts). Info tools hit live APIs; web_search runs the same search and answer
+/// writer as the VoiceAgentDemo scene (<see cref="InfoAgent"/> + qwen via Ollama), and
+/// anything the model can't handle goes to that language model instead of dead-ending
+/// on a refusal. Every reply shows in Tiger's bubble and is spoken (Supertonic 3).
 ///
 /// This is the ONLY layer that knows about the model. Swapping the .onnx and dev
 /// block on the generator leaves this connector unchanged.
@@ -40,19 +43,26 @@ public class HomeAgentConnector : MonoBehaviour
     [Header("Options")]
     [SerializeField] private bool _useCloudFallback = true;
 
-    [Header("Cloud fallback (OpenAI-compatible chat completions)")]
-    [SerializeField] private string _cloudEndpoint = "http://localhost:11434/v1/chat/completions";
-    [SerializeField] private string _cloudModel = "gpt-oss:120b-cloud";
+    [Header("Language model (OpenAI-compatible chat completions): web answers and chat")]
+    [SerializeField] private string _cloudEndpoint = LlmClient.DefaultEndpoint;
+    [SerializeField] private string _cloudModel = LlmClient.DefaultModel;
     [Tooltip("reasoning_effort sent with each request: \"low\" for gpt-oss, \"none\" for hybrid thinking models " +
              "(qwen3.5) so they answer instead of thinking, empty for models without thinking (qwen2.5).")]
-    [SerializeField] private string _cloudReasoningEffort = "low";
+    [SerializeField] private string _cloudReasoningEffort = LlmClient.DefaultReasoningEffort;
+
+    [Header("Voice reply (Supertonic 3)")]
+    [SerializeField] private bool _speakReplies = true;
+    [Tooltip("Speaks the replies; added at runtime when empty.")]
+    [SerializeField] private SpeechOutput _speech;
+    [Tooltip("Tiger's Supertonic voice (F1–F5, M1–M5).")]
+    [SerializeField] private string _voice = "M1";
 
     // Persona pinned: gpt-oss otherwise introduces itself as "ChatGPT by OpenAI"
     // when asked who it is, which breaks the demo fiction.
     // The reply language is the selected one (AgentReplies.ReplyLanguageRule), not the user's.
     static string CloudSystemPrompt =>
         "You are Tiger, the friendly smart-home assistant tiger of this house. " +
-        "Answer concisely and accurately. " + AgentReplies.ReplyLanguageRule + " Never mention OpenAI, " +
+        "Answer concisely and accurately. " + AgentReplies.ReplyLanguageRule + " " + AnswerWriter.SpokenStyle + " Never mention OpenAI, " +
         "ChatGPT, or what model you run on — you are simply Tiger. You CANNOT operate " +
         "devices yourself: if asked to control something (windows, aircon, volume, doors...), " +
         "say you can't do that here — NEVER claim you did it. One or two sentences.";
@@ -69,8 +79,11 @@ public class HomeAgentConnector : MonoBehaviour
     // retrieval, and its cloud-LLM synthesis) appends its own labelled entry, so the
     // status reads e.g. "web_search{q} 1600ms + fetch 240ms + cloud_llm 900ms".
     readonly List<string> m_NetSegs = new List<string>();
-    // An Arabic question the rules sent to web_search: the search runs on its topic ("لبنان"), the cloud answers this.
-    string m_ArabicQuestion;
+    // The user's own words when the turn is a single web search: the search and the answer read the question as asked
+    // (FunctionGemma's query argument drops words, and garbles Arabic).
+    string m_SearchText;
+    LlmClient m_Llm;
+    InfoAgent m_Info;
 
     public bool IsReady => m_Ready;
     public bool IsBusy => m_Busy;
@@ -113,6 +126,13 @@ public class HomeAgentConnector : MonoBehaviour
         if (_bubble != null) _bubble.gameObject.SetActive(true);
         if (_sendButton != null) _sendButton.onClick.AddListener(OnSend);
         if (_input != null) _input.onSubmit.AddListener(_ => OnSend());
+        m_Llm = new LlmClient(_cloudEndpoint, _cloudModel, _cloudReasoningEffort);
+        m_Info = new InfoAgent(new UnityWebClient()) { Writer = _useCloudFallback ? new AnswerWriter(m_Llm) : null };
+        _ = m_Info.WarmupAsync();
+        if (_useCloudFallback) _ = m_Llm.WarmupAsync();
+        // Unity objects: an explicit null check, since a missing component isn't C# null for ??.
+        if (_speakReplies && _speech == null) _speech = GetComponent<SpeechOutput>();
+        if (_speakReplies && _speech == null) _speech = gameObject.AddComponent<SpeechOutput>();
         SetStatus("Loading model...");
         StyleUI();
         AppLanguage.Changed += OnLanguageChanged;
@@ -125,11 +145,34 @@ public class HomeAgentConnector : MonoBehaviour
         yield return null;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         yield return _agent.WarmupRoutine();   // on Android, copies the model out of the APK first
+        yield return LoadVoice();
         sw.Stop();
         m_Ready = true;
         SetStatus($"Warmup {sw.ElapsedMilliseconds}ms");
         ShowResponse(AgentReplies.Greeting, 4f);
     }
+
+    // Supertonic loads after FunctionGemma and before the mic's models (VoiceCommandInput waits for IsReady), so the
+    // three loads don't stack into one long hitch. Without it the replies still show in the bubble.
+    IEnumerator LoadVoice()
+    {
+        if (!_speakReplies || _speech == null) yield break;
+        var prepare = ModelRoots.PrepareAsync().GetAwaiter();   // Android: copies the models out of the APK
+        while (!prepare.IsCompleted) yield return null;
+        try
+        {
+            prepare.GetResult();
+            _speech.Voice = _voice;
+            _speech.Load(ModelRoots.Tts);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[Voice] Supertonic didn't load, replies are text only: {e.Message}");
+        }
+    }
+
+    /// <summary>Stops the spoken reply (the mic calls this before it listens, so the agent doesn't hear itself).</summary>
+    public void StopSpeaking() { if (_speech != null) _speech.Stop(); }
 
     void OnSend()
     {
@@ -192,7 +235,6 @@ public class HomeAgentConnector : MonoBehaviour
         // An Arabic question the rules recognised as a search: the call is built here with the topic in its original
         // spelling, since FunctionGemma garbles Arabic it has to copy ("لبنان" → "linger", "عاصمة فرنسا" → "اصمه فرنسا").
         bool arabicSearch = modelText != user && modelText.StartsWith(ArabicCommands.SearchPrefix, System.StringComparison.Ordinal);
-        m_ArabicQuestion = arabicSearch ? user : null;
         var local = arabicChat || arabicSearch ? null : LocalIntents.Match(modelText);
         if (arabicChat) SessionLog("AR    no command, chat");
         else if (arabicSearch)
@@ -214,6 +256,7 @@ public class HomeAgentConnector : MonoBehaviour
         }
 
         if (modelText != user) PinRewrittenCity(calls, modelText);
+        m_SearchText = calls.Count == 1 && calls[0].Name == "web_search" ? user : null;
 
         // Reflect the tool call in the status UI IMMEDIATELY after generation — before
         // Tiger walks over and the device acts — so the feedback isn't delayed by the walk.
@@ -240,10 +283,14 @@ public class HomeAgentConnector : MonoBehaviour
             if (_useCloudFallback)
             {
                 string ans = null;
-                yield return AgentCloudClient.Complete(CloudSystemPrompt, user, _cloudEndpoint, _cloudModel,
-                                                       (a, ms) => { ans = a; cloudMs = ms; }, _cloudReasoningEffort);
-                if (!string.IsNullOrEmpty(ans) && !ans.StartsWith("(cloud")) { usedCloud = true; responses.Add(ans); }
-                else responses.Add(AgentReplies.CantHandle);
+                yield return Wait(m_Llm.CompleteAsync(CloudSystemPrompt, user), a => ans = AnswerWriter.Clean(a, AppLanguage.Current));
+                cloudMs = (long)m_Llm.LastMs;
+                if (ans != null) { usedCloud = true; responses.Add(ans); }
+                else
+                {
+                    SessionLog($"LLM   no reply ({m_Llm.LastError ?? "not in the selected language"})");
+                    responses.Add(AgentReplies.CantHandle);
+                }
             }
             else responses.Add(AgentReplies.CantHandle);
         }
@@ -251,6 +298,7 @@ public class HomeAgentConnector : MonoBehaviour
         sw.Stop();
         var answer = string.Join(" ", responses);
         ShowResponse(answer);
+        Speak(answer);
         SessionLog($"RAW   {(raw ?? "").Replace('\n', ' ')}");
         if (calls.Count > 0) SessionLog($"CALLS {string.Join(" | ", calls.ConvertAll(c => c.Raw))}");
         SessionLog(usedCloud ? $"CLOUD {answer} (route={cloudMs}ms)" : $"AGENT {answer}");
@@ -434,40 +482,21 @@ public class HomeAgentConnector : MonoBehaviour
                 fsw.Stop(); m_NetSegs.Add($"fetch {fsw.ElapsedMilliseconds}ms");
                 responses.Add(loc); break;
             }
-            // web_search = RETRIEVE (DuckDuckGo) -> SYNTHESIZE (cloud LLM over the results).
-            // A real search-then-answer chain: the search grounds the cloud answer, so it
-            // works even when there's no clean instant-answer. Distinct from the chit-chat
-            // cloud fallback, which answers directly with no retrieval.
+            // web_search: the same pipeline as the VoiceAgentDemo scene. InfoAgent searches Wikidata / Wikipedia (and
+            // DuckDuckGo + Bing in English), ranks the passages, and the language model writes the answer from the best
+            // ones; without the model the best sentence is the answer.
             case "web_search":
             {
                 string query = Arg(call, "query") ?? "";
-                // 1) retrieve context from the web
-                var fsw = System.Diagnostics.Stopwatch.StartNew(); string context = null;
-                yield return AgentInfoApis.WebSearchRetrieve(query, c => context = c);
-                fsw.Stop(); m_NetSegs.Add($"fetch {fsw.ElapsedMilliseconds}ms");
-                // 2) synthesize a grounded answer with the cloud LLM
-                string answer = null;
-                if (_useCloudFallback)
-                {
-                    SetStatus($"web_search{{{query}}} synthesizing...");
-                    string sys =
-                        "You answer the user's question using the web search results provided. " +
-                        "Ground your answer in them; if they are insufficient, answer from your own " +
-                        "knowledge and note that briefly. " + AgentReplies.ReplyLanguageRule + " One or two sentences.";
-                    // An Arabic question searched by its topic is answered as asked ("أين يقع لبنان؟", not "لبنان").
-                    string question = m_ArabicQuestion ?? query;
-                    string prompt = string.IsNullOrEmpty(context)
-                        ? $"Question: {question}\n\n(No search results were found.)"
-                        : $"Question: {question}\n\nWeb search results:\n{context}";
-                    var lsw = System.Diagnostics.Stopwatch.StartNew(); string ans = null;
-                    yield return AgentCloudClient.Complete(sys, prompt, _cloudEndpoint, _cloudModel, (a, _) => ans = a, _cloudReasoningEffort);
-                    lsw.Stop(); m_NetSegs.Add($"cloud_llm {lsw.ElapsedMilliseconds}ms");
-                    if (!string.IsNullOrEmpty(ans) && !ans.StartsWith("(cloud")) answer = ans;
-                }
-                // 3) fallback: raw retrieved snippet, or a not-found note
-                if (string.IsNullOrEmpty(answer))
-                    answer = !string.IsNullOrEmpty(context) ? context : AgentReplies.NotFound(query);
-                responses.Add(answer);
+                var question = m_SearchText ?? query;
+                SetStatus($"web_search{{{query}}} searching...");
+                InfoAnswer info = null;
+                yield return Wait(m_Info.AnswerAsync(VoiceAgent.CommandCatalog.WebSearch, question, AppLanguage.Current,
+                                                     step => SetStatus($"web_search{{{query}}} {step}")), a => info = a);
+                foreach (var step in info.Steps) SessionLog($"INFO  {step}");
+                m_NetSegs.Add($"search {info.Ms - info.WriteMs:F0}ms");
+                if (info.WrittenBy != null) m_NetSegs.Add($"{info.WrittenBy} {info.WriteMs:F0}ms");
+                responses.Add(info.Found && !string.IsNullOrEmpty(info.Speech) ? info.Speech : AgentReplies.NotFound(query));
                 break;
             }
             default:
@@ -477,6 +506,21 @@ public class HomeAgentConnector : MonoBehaviour
     }
 
     static string NoRoom(string r) => AgentReplies.NoRoom(r);
+
+    // The shared answer pipeline is async (Awaitable); the turn is a coroutine.
+    static IEnumerator Wait<T>(Awaitable<T> task, System.Action<T> done)
+    {
+        var awaiter = task.GetAwaiter();
+        while (!awaiter.IsCompleted) yield return null;
+        done(awaiter.GetResult());
+    }
+
+    // The reply is spoken while it shows in the bubble; a new reply or the mic cuts it off.
+    void Speak(string text)
+    {
+        if (!_speakReplies || _speech == null || !_speech.IsLoaded || string.IsNullOrWhiteSpace(text)) return;
+        _ = _speech.Speak(text);
+    }
 
     static string Arg(ParsedCall c, string key)
     {
@@ -490,7 +534,8 @@ public class HomeAgentConnector : MonoBehaviour
     void ShowResponse(string text, float seconds = 6f)
     {
         if (_bubble == null || string.IsNullOrEmpty(text)) return;
-        _bubble.Say(text, seconds);
+        // Long answers stay up about as long as they take to say (~12 characters a second).
+        _bubble.Say(text, Mathf.Max(seconds, 2f + text.Length / 12f));
     }
 
     // ---- UI polish: rounded corners on the button/input/status + English placeholder ----

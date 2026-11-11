@@ -27,8 +27,9 @@ namespace VoiceAgent
     /// <summary>
     /// Turn logic of the voice agent. Typed or spoken text is ranked into command chips;
     /// on submit the best command runs when it is confident enough. "Who are you" gets the persona's introduction,
-    /// weather/time/location/search are answered from the internet, and chat or low-confidence turns get a reply
-    /// from Gemma3 in the persona's voice. Every reply is in the selected <see cref="AppLanguage"/>. Arabic commands are
+    /// weather/time/location/search are answered from the internet (the language model writes web answers from what the
+    /// search found), and chat gets a reply in the persona's voice from the language model (qwen via Ollama), or from
+    /// Gemma3 on-device when it can't be reached. Every reply is in the selected <see cref="AppLanguage"/>. Arabic commands are
     /// rewritten to the English command the Decision AI head was trained on (<see cref="ArabicCommands"/>) before
     /// ranking; the user still sees what they typed or said.
     /// </summary>
@@ -44,6 +45,7 @@ namespace VoiceAgent
         readonly SpeechOutput m_Speech;
         readonly ProceduralMusic m_Music;
         readonly InfoAgent m_Info;
+        readonly LlmClient m_Llm;
         readonly Persona m_Persona;
         readonly TimingPanel m_Timing;
 
@@ -60,7 +62,7 @@ namespace VoiceAgent
         public bool IsBusy => m_Busy;
 
         public AssistantController(CommandCatalog catalog, Persona persona, SmartHome home, DecisionAIRanker ranker, Gemma3Model gemma, AssistantView view,
-            ProceduralMusic music, SpeechOutput speech = null, InfoAgent info = null, TimingPanel timing = null)
+            ProceduralMusic music, SpeechOutput speech = null, InfoAgent info = null, TimingPanel timing = null, LlmClient llm = null)
         {
             m_Timing = timing;
             m_Catalog = catalog;
@@ -72,6 +74,7 @@ namespace VoiceAgent
             m_Gemma = gemma;
             m_Speech = speech;
             m_Info = info;
+            m_Llm = llm;
 
             view.TextChanged += QueueRank;
             view.CanSubmit = () => !m_Busy;
@@ -249,7 +252,7 @@ namespace VoiceAgent
                 foreach (var step in answer.Steps) UnityEngine.Debug.Log($"[Info] {step}");
                 if (answer.Found || command.id != CommandCatalog.WebSearch)
                 {
-                    ActionDone(InfoAgent.ActionLabel(command.id, answer.Sources));
+                    ActionDone(InfoAgent.ActionLabel(command.id, answer));
                     m_View.UpdateMessage(bubble, WithSources(answer.Speech, answer.Sources));
                     await Speak(answer.Speech);
                     return;
@@ -269,6 +272,12 @@ namespace VoiceAgent
             await Speak(reply);
         }
 
+        /// <summary>
+        /// Chat only gets here when no command matched, so the model can't act: it must not claim it switched something,
+        /// and it stays the persona instead of naming the model behind it.
+        /// </summary>
+        const string ChatRules = "You cannot operate devices from this conversation: if asked to control something, say you can't do that here and never claim you did it. Never say which AI model you are or who made it.";
+
         static string WithSources(string text, string sources) =>
             string.IsNullOrEmpty(sources) ? text : $"{text}\n<size=15><color=#6B6780>{(AppLanguage.Current == Lang.Ar ? "المصدر" : "Source")} / {sources}</color></size>";
 
@@ -280,11 +289,23 @@ namespace VoiceAgent
             // A prefix means the web search found nothing and Gemma answers instead: two sentences at most, like the web answers.
             var search = !string.IsNullOrEmpty(prefix);
             prefix ??= string.Empty;
-            string answer;
+            string answer = null, writer = "Gemma3";
             try
             {
-                m_Gemma.SystemPrompt = m_Persona.SystemPrompt(AppLanguage.Current, search);
-                answer = ReplyText.Clean(await m_Gemma.GenerateAsync(text, 48, partial => m_View.UpdateMessage(bubble, prefix + ReplyText.Clean(partial))));
+                // The language model first (it knows the world and keeps to the language); Gemma3 on-device when it can't
+                // be reached, e.g. without Ollama or on a phone.
+                if (m_Llm != null)
+                {
+                    var system = $"{m_Persona.SystemPrompt(AppLanguage.Current, search)} {ChatRules} {AnswerWriter.LanguageRule(AppLanguage.Current)} {AnswerWriter.SpokenStyle}";
+                    answer = AnswerWriter.Clean(await m_Llm.CompleteAsync(system, text), AppLanguage.Current);
+                    if (answer != null) writer = m_Llm.ShortName;
+                    else UnityEngine.Debug.Log($"[Turn] {m_Llm.ShortName} gave no reply ({m_Llm.LastError ?? "not in the selected language"}), Gemma3 answers");
+                }
+                if (answer == null)
+                {
+                    m_Gemma.SystemPrompt = m_Persona.SystemPrompt(AppLanguage.Current, search);
+                    answer = ReplyText.Clean(await m_Gemma.GenerateAsync(text, 48, partial => m_View.UpdateMessage(bubble, prefix + ReplyText.Clean(partial))));
+                }
             }
             catch (System.Exception e)
             {
@@ -313,7 +334,7 @@ namespace VoiceAgent
             }
             if (string.IsNullOrWhiteSpace(answer)) answer = m_Persona.NotSure(AppLanguage.Current);
             answer = prefix + answer;
-            ActionDone(prefix.Length > 0 ? "Action / search + Gemma3" : "Action / Gemma3 reply");
+            ActionDone(prefix.Length > 0 ? $"Action / search + {writer}" : $"Action / {writer} reply");
             m_View.UpdateMessage(bubble, answer);
             await Speak(answer);
         }
@@ -332,6 +353,7 @@ namespace VoiceAgent
 
         async Awaitable Speak(string text)
         {
+            UnityEngine.Debug.Log($"[Reply] {text}");
             var start = m_SttSeconds + m_IntentSeconds + m_ActionSeconds;
             if (m_Speech == null || !m_Speech.IsLoaded)
             {

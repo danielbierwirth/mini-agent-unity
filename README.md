@@ -10,8 +10,8 @@ The project also contains **Nova**, the voice-agent demo from [voice-agent-unity
 * **On-device function calling:** a 270M model turns a sentence into a validated tool call locally.
 * **Voice input:** tap **Mic** and speak; Silero VAD + SenseVoice transcribe on-device and the transcript runs the same turn as a typed command.
 * **Three languages & multi-intent:** English, Korean and Arabic (EN / KR / AR toggle in both scenes), including compound commands like `거실 불 켜고 거실 티비 켜줘` or `شغّل التلفاز وأطفئ ضوء المطبخ`.
-* **Embodied:** the tiger walks to the target device, *then* acts; replies appear in a speech bubble over its head.
-* **Hybrid:** a schema gate validates every call; anything that isn't a valid home action defers to an optional LLM (local or cloud, via Ollama).
+* **Embodied:** the tiger walks to the target device, *then* acts; replies appear in a speech bubble over its head and are spoken aloud (Supertonic 3).
+* **Hybrid:** a schema gate validates every call; web answers and anything that isn't a valid home action go to an optional LLM (local or cloud, via Ollama), the same one Nova uses.
 * **Two agents, one project:** switch to the Nova voice-agent demo scene and back with one button.
 
 ## 🗣 What you can say
@@ -62,7 +62,9 @@ Rooms: **kitchen**, **living room**, **bedroom** (room-less commands resolve to 
      │
      └─ info tools (network) ──────────►  AgentInfoApis
           get_time / get_location / get_weather
-          web_search ─► fetch results ─► LLM (grounded synthesis) ─► answer
+          web_search ─► InfoAgent (search + rank) ─► LLM (grounded synthesis) ─► answer
+
+  every reply ─► speech bubble + Supertonic 3 voice
 ```
 
 Two paths reach the LLM: **(1)** when no valid tool call is produced, the whole turn falls back to it for a conversational reply; **(2)** `web_search` fetches results on-device and then asks the LLM to synthesize a grounded answer. Everything else (all device control) stays fully on-device and offline.
@@ -85,9 +87,9 @@ The prompt is assembled to be byte-identical to the fine-tuning chat template; t
 `FgCallParser.ParseAll` extracts one or more calls from the raw text (handling the escape spans and multiple calls). Each parsed call passes through a schema gate that checks the tool exists and every argument is well-typed and in range (enums like light colors, numeric bounds like brightness/volume). Invalid calls are rejected and logged, never executed. Local-intent calls go through the same parser and gate.
 
 **3. Execute: `HomeDeviceController.cs` + `TigerController.cs`**
-Valid calls mutate device state (lights, TV, computer, speaker + volume/genre, vacuum). The tiger (a `NavMeshAgent`) navigates to the relevant device before the state changes, on a NavMesh baked at startup by `RuntimeNavMeshBake`. Responses render in a speech bubble above Tiger's head (`TigerSpeechBubble`). Info tools (`get_weather`, `get_time`, `get_location`, `web_search`) call live web APIs in `AgentInfoApis.cs`; `web_search` additionally grounds a synthesized answer through the LLM.
+Valid calls mutate device state (lights, TV, computer, speaker + volume/genre, vacuum). The tiger (a `NavMeshAgent`) navigates to the relevant device before the state changes, on a NavMesh baked at startup by `RuntimeNavMeshBake`. Responses render in a speech bubble above Tiger's head (`TigerSpeechBubble`) and are spoken by Supertonic 3 (`SpeechOutput`, voice `M1`; the Mic button cuts the reply off). `get_weather`, `get_time` and `get_location` call live web APIs in `AgentInfoApis.cs`; `web_search` runs Nova's search pipeline (`InfoAgent`) and has the LLM write the answer from what it found.
 
-**4. LLM fallback: `AgentCloudClient.cs` (optional)**
+**4. LLM fallback: `LlmClient.cs` (optional, shared with Nova)**
 When no valid tool call comes out (e.g. `오늘 기분 어때?`), the turn defers to an LLM over an **OpenAI-compatible** chat-completions endpoint, with a persona system prompt. Turn the toggle off to run purely on-device; home control still works.
 
 The turn orchestration, status UI, and per-turn timing/harvest logging live in `HomeAgentConnector.cs`.
@@ -103,25 +105,31 @@ The speech and Nova models come the same way, as Hugging Face packages with thei
 |---|---|---|
 | [`com.sky.sentis.silero-vad`](https://huggingface.co/Sky-Kim/com.sky.sentis.silero-vad) | Silero VAD (FP16, CPU) | voice input in both scenes |
 | [`com.sky.sentis.sensevoice`](https://huggingface.co/Sky-Kim/com.sky.sentis.sensevoice) | SenseVoice-Small (FP16, GPU) | voice input in both scenes |
-| [`com.sky.sentis.gemma3-270m-it`](https://huggingface.co/Sky-Kim/com.sky.sentis.gemma3-270m-it) | gemma-3-270m-it (FP16) | Nova: intent ranking + chat |
-| [`com.sky.sentis.supertonic`](https://huggingface.co/Sky-Kim/com.sky.sentis.supertonic) | Supertonic 3 (FP16, CPU) | Nova: text to speech |
+| [`com.sky.sentis.gemma3-270m-it`](https://huggingface.co/Sky-Kim/com.sky.sentis.gemma3-270m-it) | gemma-3-270m-it (FP16) | Nova: intent ranking; chat when the LLM can't be reached |
+| [`com.sky.sentis.supertonic`](https://huggingface.co/Sky-Kim/com.sky.sentis.supertonic) | Supertonic 3 (FP16, CPU) | spoken replies in both scenes (Nova: voice F2, Tiger: M1) |
 
 Before a player build, `ModelBuildStaging` copies these four into `StreamingAssets/Models` (about 1.4 GB) and removes the copy afterwards; Android copies them out of the APK on first launch.
 
 ## 🎙 Voice Agent demo scene (Nova)
-`Assets/Scenes/VoiceAgentDemo.unity` is the demo from [voice-agent-unity](https://github.com/skykim/voice-agent-unity), copied in with its code (`Assets/VoiceAgent`) and intent head (`Assets/StreamingAssets/Intent`). The only change is in the shared `VoiceInput` (see below). Nova is a separate assistant with its own pipeline: Silero VAD + SenseVoice for speech, a frozen gemma-3-270m-it with a trained Decision AI head that ranks 20 commands live while you talk, Gemma3 generation for chat, and Supertonic 3 for spoken replies, all on-device.
+`Assets/Scenes/VoiceAgentDemo.unity` is the demo from [voice-agent-unity](https://github.com/skykim/voice-agent-unity), copied in with its code (`Assets/VoiceAgent`) and intent head (`Assets/StreamingAssets/Intent`). The only change is in the shared `VoiceInput` (see below). Nova is a separate assistant with its own pipeline: Silero VAD + SenseVoice for speech, a frozen gemma-3-270m-it with a trained Decision AI head that ranks 20 commands live while you talk, and Supertonic 3 for spoken replies, all on-device. Web answers and chat are written by the same language model as Tiger's (see [Language model](#-language-model-optional)); Gemma3 generation answers chat on-device when it can't be reached.
 
 **Switching scenes:** a `SceneToggle` button sits in each scene: **Voice Agent** (top-left) in MiniAgentScene, **Mini Agent** (top-center) in VoiceAgentDemo. Loading the other scene unloads the current one, so only one scene's models are in memory at a time. Target scene, label, position, size and font size are set in the Inspector; both scenes must be in the Build Profile's scene list (they are).
 
 Both scenes share one copy of the speech-to-text code (`Assets/VoiceAgent/Runtime/Audio`); Tiger's Mic button uses it through `VoiceCommandInput`. Compared with voice-agent-unity, `VoiceInput` adds an `IsLoaded` flag, catches up on buffered mic audio each frame, and spreads speech recognition over frames on mobile so the 3D scene keeps its frame rate.
 
-## ☁️ LLM Fallback (optional)
-Configured on the `HomeAgentConnector` component:
+## ☁️ Language model (optional)
+Both scenes use one language model, through the shared `LlmClient` (`Assets/VoiceAgent/Runtime/Info`), for the answers a fixed template can't give:
+
+* **Web answers:** `InfoAgent` searches (Wikidata for property questions, Wikipedia in the selected language, plus DuckDuckGo and Bing in English), ranks the passages, and `AnswerWriter` has the model write a one- or two-sentence answer from the best ones. Without the model, the best-ranked sentence is the answer.
+* **Chat:** anything that isn't a command. Tiger answers as Tiger, Nova as Nova (`Persona.json`); without the model Nova falls back to Gemma3 on-device and Tiger says it can't help.
+* Weather, time, location and device replies stay fixed templates, so they don't need the model.
+
+Configured on `HomeAgentConnector` (MiniAgentScene) and `VoiceAgentDemoScene` (VoiceAgentDemo), with the same defaults; an empty endpoint on Nova, or `Use Cloud Fallback` off on Tiger, turns it off. Each scene sends a one-token warm-up request at start so the first answer doesn't wait for Ollama to load the model.
 
 * **Endpoint:** `http://localhost:11434/v1/chat/completions`: an [Ollama](https://ollama.com) server on the same machine.
 * **Model:** `qwen3.5:9b`, a local model (`ollama pull qwen3.5:9b`; needs a recent Ollama).
 * **Reasoning effort:** `none`. Thinking models spend the token budget before answering, and an all-thinking reply comes back empty. Use `none` for qwen3.5 (it ignores `low`), `low` for gpt-oss (it can't turn thinking off), and leave it empty for models without thinking (qwen2.5 rejects the field).
-* **Toggle:** `Use Cloud Fallback` (on by default)
+* **Toggle:** `Use Cloud Fallback` on Tiger (on by default); an empty endpoint on Nova
 
 Ollama cloud models such as `gpt-oss:120b-cloud` also work through the same daemon (`ollama signin`), but need usage credits on the Ollama account; set the reasoning effort to `low` for gpt-oss.
 
@@ -133,9 +141,9 @@ Any OpenAI-compatible endpoint works; point it wherever you like, or disable it 
 The **EN / 한국어 / العربية** toggle (top bar, both scenes) sets one shared language (`AppLanguage`, kept in PlayerPrefs). Switching takes effect on the next turn, without reloading the scene:
 
 * **Speech to text:** the selected language is passed to the model explicitly. SenseVoice-Small handles English and Korean; it has no Arabic, so Arabic goes to **Whisper** (multilingual) with the `<|ar|>` token. Whisper isn't in git: run **VoiceAgent ▸ Speech ▸ Download Whisper Tiny / Base / Small** once (writes 114 / 194 / 543 MB to `StreamingAssets/Whisper/<size>`); `ModelRoots.WhisperSize` picks the one Arabic uses (default **small**; only that one is needed). Whisper is prompted with the Arabic command words (`SpeechLanguage.ArabicPrompt`), which steers short commands to the right spelling. [Docs/stt-roundtrip.md](Docs/stt-roundtrip.md) compares the sizes on the EN / KR / AR test phrases.
-* **Understanding:** FunctionGemma and Nova's Decision AI head were trained on English and Korean only, so an Arabic command is first rewritten to the English command it means (`ArabicCommands`: `أطفئ أضواء المطبخ` → `turn off the kitchen light`). Tool names, arguments and device IDs stay English; English, Korean and Arabic device and room names all land on the same IDs. Arabic that isn't a home or info command goes to the chat model (Gemma3 for Nova, the LLM fallback for Tiger).
+* **Understanding:** FunctionGemma and Nova's Decision AI head were trained on English and Korean only, so an Arabic command is first rewritten to the English command it means (`ArabicCommands`: `أطفئ أضواء المطبخ` → `turn off the kitchen light`). Tool names, arguments and device IDs stay English; English, Korean and Arabic device and room names all land on the same IDs. Arabic questions (أين، ما، من، كيف، هل … and the Gulf, Levantine and Egyptian forms وين، شو، ليش، مين …) go to the web search; other Arabic that isn't a command goes to chat.
 * **Replies:** device replies, persona lines and info answers are in the selected language (`AgentReplies`, `Commands.json` / `Persona.json` `_ko` / `_ar` fields); the chat models are told to answer in it.
-* **Speech output (Nova):** Supertonic 3 speaks Arabic replies with its `<ar>` language tag, the same way supertonic3-unity does: NFKD normalization and a character-level `unicode_indexer`, no phonemizer, language-independent voice styles. Digits become Arabic-Indic before synthesis.
+* **Speech output (both scenes):** Supertonic 3 speaks Arabic replies with its `<ar>` language tag, the same way supertonic3-unity does: NFKD normalization and a character-level `unicode_indexer`, no phonemizer, language-independent voice styles. Digits become Arabic-Indic before synthesis.
 * **Text:** every text is an RTL Text Mesh Pro component (`AutoRtlText`, RTLTMPro 4.0.0 from `https://github.com/hk1ll3r/RTLTMPro.git?path=/UPMPackage`) on TMP's LiberationSans SDF, with **Noto Sans KR** (dynamic) and **Noto Sans Arabic** (static 1024² atlas baked from RTLTMPro's `ArabicAll.txt`) as fallbacks. Force Fix turns on only for text that contains Arabic, so mixed Arabic + English + numbers render right-to-left in the right order while English and Korean stay on TMP's normal path; Preserve Numbers is on; Farsi is off.
 
 ## 🗂 Project structure
@@ -146,8 +154,7 @@ Assets/
 │  ├─ LocalIntents.cs             # rule matcher for stop_vacuum / volume_up / volume_down / introduce_self
 │  ├─ CommandSuggestions.cs       # example command buttons above the input field + shuffle
 │  ├─ ToolCallValidation.cs       # tool schemas + validating gate
-│  ├─ AgentCloudClient.cs         # OpenAI-compatible chat-completions client
-│  ├─ AgentInfoApis.cs            # weather / time / location / web_search backends
+│  ├─ AgentInfoApis.cs            # weather / time / location backends
 │  ├─ RuntimeNavMeshBake.cs       # bakes the NavMesh at startup
 │  ├─ TigerSpeechBubble.cs        # speech bubble above Tiger's head
 │  └─ MiniAgentTestRunner.cs      # scripted command list, started/stopped with a button

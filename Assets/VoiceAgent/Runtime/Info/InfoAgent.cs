@@ -17,21 +17,36 @@ namespace VoiceAgent.Info
         public string Sources;
         public readonly List<string> Steps = new();
         public double Ms;
+        /// <summary>What the search found, one line per source, for <see cref="AnswerWriter"/> to write the answer from.</summary>
+        public readonly List<string> Evidence = new();
+        /// <summary>The source of the best evidence, shown when the written answer has no extracted one.</summary>
+        public string EvidenceSources;
+        /// <summary>The model that wrote <see cref="Speech"/> ("qwen3.5"), or null for an extracted answer; and its time.</summary>
+        public string WrittenBy;
+        public double WriteMs;
     }
 
     /// <summary>
     /// Answers the information commands from the internet: get_weather / get_time (a named city) via Open-Meteo,
     /// get_location via the public IP, and web_search via Wikidata for property questions, otherwise query rewrite →
-    /// parallel keyless sources → sentence ranking (lexical + Gemma3 similarity) → extractive answer.
+    /// parallel keyless sources → sentence ranking (lexical + Gemma3 similarity). With a <see cref="Writer"/>, the language
+    /// model writes the search answer from the best passages; without one, or when it can't be reached, the answer is the
+    /// best-ranked sentence itself.
     /// </summary>
     public sealed class InfoAgent
     {
         public float MinScore = 0.7f;
         public int MaxAnswerChars = 190;
+        /// <summary>How many passages, and how much of each, the writer gets: enough to answer, short enough to stay fast.</summary>
+        public int MaxEvidence = 4;
+        public int MaxEvidenceChars = 500;
 
         readonly IWebClient m_Web;
         readonly GeoWeather m_Geo;
         readonly PassageRanker m_Ranker;
+
+        /// <summary>Writes web answers from the evidence (both scenes: qwen via Ollama); null keeps the extracted sentence.</summary>
+        public AnswerWriter Writer;
 
         public InfoAgent(IWebClient web, Gemma3Model gemma = null)
         {
@@ -64,6 +79,10 @@ namespace VoiceAgent.Info
         /// <summary>The placeholder bubble shown while an answer is being fetched.</summary>
         public static string LookingUp(Lang lang) => AppLanguage.Pick(lang, "Looking it up…", "찾아보는 중…", "أبحث عن ذلك…");
 
+        /// <summary>The timing panel's action label for an answer from <see cref="AnswerAsync"/>, naming the writer when a model wrote it.</summary>
+        public static string ActionLabel(string commandId, InfoAnswer answer) =>
+            answer.WrittenBy != null ? $"Action / search + {answer.WrittenBy}" : ActionLabel(commandId, answer.Sources);
+
         /// <summary>The timing panel's action label for an answer from <see cref="AnswerAsync"/>.</summary>
         public static string ActionLabel(string commandId, string sources) => commandId switch
         {
@@ -95,7 +114,10 @@ namespace VoiceAgent.Info
                         if (!await Time(text, lang, answer, Step, cancel)) return null;
                         break;
                     case "get_location": await Location(lang, answer, Step, cancel); break;
-                    default: await Search(text, lang, answer, Step, cancel); break;
+                    default:
+                        await Search(text, lang, answer, Step, cancel);
+                        await Write(text, lang, answer, Step, cancel);
+                        break;
                 }
             }
             catch (Exception e) when (e is not OperationCanceledException)
@@ -109,6 +131,26 @@ namespace VoiceAgent.Info
                     "인터넷에서 정보를 가져오지 못했어요. 연결을 확인해 주세요.", "لم أتمكن من الوصول إلى الإنترنت. يرجى التحقق من الاتصال.");
             answer.Ms = clock.Elapsed.TotalMilliseconds;
             return answer;
+        }
+
+        /// <summary>The writer composes the answer from the evidence; the extracted sentence stays when it can't.</summary>
+        async Awaitable Write(string text, Lang lang, InfoAnswer answer, Action<string> step, CancellationToken cancel)
+        {
+            if (Writer == null) return;
+            step(AppLanguage.Pick(lang, "Writing the answer…", "답을 정리하는 중…", "أكتب الإجابة…"));
+            var clock = Stopwatch.StartNew();
+            var written = await Writer.WriteSearchAnswerAsync(text, answer.Evidence, lang, cancel);
+            answer.WriteMs = clock.Elapsed.TotalMilliseconds;
+            if (written == null)
+            {
+                answer.Steps.Add($"writer: no answer ({Writer.Llm.LastError ?? "not in the selected language"}), keeping the extracted one");
+                return;
+            }
+            answer.Steps.Add($"writer: {Writer.Llm.ShortName} {answer.WriteMs:F0} ms from {answer.Evidence.Count} results");
+            answer.Speech = written;
+            answer.WrittenBy = Writer.Llm.ShortName;
+            answer.Sources ??= answer.EvidenceSources;
+            answer.Found = true;
         }
 
         async Awaitable Weather(string text, Lang lang, InfoAnswer answer, Action<string> step, CancellationToken cancel)
@@ -169,6 +211,7 @@ namespace VoiceAgent.Info
                     answer.Steps.Add($"wikidata: {found.EntityId} {found.EntityLabel} → {string.Join(", ", found.Values)}");
                     answer.Speech = found.Speech;
                     answer.Sources = $"Wikidata / {found.EntityLabel}";
+                    answer.Evidence.Add($"Wikidata / {found.EntityLabel}: {found.Speech}");
                     answer.Found = true;
                     return;
                 }
@@ -251,6 +294,7 @@ namespace VoiceAgent.Info
             // Numbers and dates are already enforced by the expected answer type.
             if (fact != null && fact.Property.Kind == Wikidata.Kind.Item)
                 ranked = ranked.Where(c => fact.Property.Ask.IsMatch(c.Sentence)).ToList();
+            CollectEvidence(ranked, answer);
             if (ranked.Count == 0 || ranked[0].Score < MinScore) return;
             // A sentence that covers none of the query's keywords is a lookalike, not an answer, however similar Gemma finds it.
             if (ranked[0].Coverage <= 0f) return;
@@ -258,6 +302,21 @@ namespace VoiceAgent.Info
             if (news) ComposeNews(query, lang, ranked, answer);
             else ComposeFact(ranked, expect, answer);
             answer.Found = !string.IsNullOrEmpty(answer.Speech);
+        }
+
+        /// <summary>The best few passages that cover the question, for the writer: the matched sentence plus the start of its
+        /// passage for context, one source per line.</summary>
+        void CollectEvidence(List<Candidate> ranked, InfoAnswer answer)
+        {
+            var seen = new HashSet<Passage>();
+            foreach (var c in ranked.Where(c => c.Coverage > 0))
+            {
+                if (seen.Count >= MaxEvidence || !seen.Add(c.Passage)) continue;
+                var source = string.IsNullOrEmpty(c.Passage.Title) ? c.Passage.Source : $"{c.Passage.Source} / {c.Passage.Title}";
+                var context = InfoText.Truncate(c.Passage.Text ?? string.Empty, MaxEvidenceChars);
+                answer.Evidence.Add(context.Contains(c.Sentence) ? $"{source}: {context}" : $"{source}: {c.Sentence} {context}");
+                answer.EvidenceSources ??= source;
+            }
         }
 
         void ComposeFact(List<Candidate> ranked, AnswerType expect, InfoAnswer answer)

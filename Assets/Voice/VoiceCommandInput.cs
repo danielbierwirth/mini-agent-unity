@@ -83,6 +83,7 @@ public class VoiceCommandInput : MonoBehaviour
         if (m_Voice == null) return;
         if (m_Voice.IsListening) { m_Voice.Stop(); return; }
         if (_connector != null && _connector.IsBusy) return;   // one turn at a time
+        if (_connector != null) _connector.StopSpeaking();     // don't let the mic hear Tiger's reply
         if (!m_Voice.Listen())
         {
             Debug.LogWarning(m_Voice.CanListen

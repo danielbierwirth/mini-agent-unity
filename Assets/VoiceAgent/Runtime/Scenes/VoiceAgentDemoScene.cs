@@ -9,8 +9,8 @@ namespace VoiceAgent.Scenes
 {
     /// <summary>
     /// Everything together: mic → Silero VAD → SenseVoice (partials re-rank the chips live) → Gemma3 + Decision AI picks the
-    /// command → the home changes or the web answers → Supertonic 3 speaks as Nova. Chat and low-confidence turns go to
-    /// Gemma3 generation with the persona prompt.
+    /// command → the home changes or the web answers → Supertonic 3 speaks as Nova. Web answers and chat are written by the
+    /// language model (qwen via Ollama, the same as the MiniAgent scene), with Gemma3 generation as the on-device fallback.
     /// </summary>
     public sealed class VoiceAgentDemoScene : MonoBehaviour
     {
@@ -20,6 +20,12 @@ namespace VoiceAgent.Scenes
         [SerializeField] ProceduralMusic m_Music;
         [SerializeField] SpeechOutput m_Speech;
         [SerializeField] TimingPanel m_Timing;
+
+        [Header("Language model (OpenAI-compatible chat completions; empty endpoint = on-device Gemma3 only)")]
+        [SerializeField] string m_LlmEndpoint = LlmClient.DefaultEndpoint;
+        [SerializeField] string m_LlmModel = LlmClient.DefaultModel;
+        [Tooltip("reasoning_effort: \"none\" for hybrid thinking models (qwen3.5), \"low\" for gpt-oss, empty for models without thinking.")]
+        [SerializeField] string m_LlmReasoningEffort = LlmClient.DefaultReasoningEffort;
 
         AssistantController m_Controller;
         VoiceInput m_Voice;
@@ -72,10 +78,12 @@ namespace VoiceAgent.Scenes
             await m_Gemma.GenerateAsync("hi", 2);
             if (!this) return;
             m_Voice = new VoiceInput();
-            var info = new InfoAgent(new UnityWebClient(), m_Gemma);
+            var llm = string.IsNullOrEmpty(m_LlmEndpoint) ? null : new LlmClient(m_LlmEndpoint, m_LlmModel, m_LlmReasoningEffort);
+            var info = new InfoAgent(new UnityWebClient(), m_Gemma) { Writer = llm != null ? new AnswerWriter(llm) : null };
             _ = info.WarmupAsync();
+            if (llm != null) _ = llm.WarmupAsync();
 
-            m_Controller = new AssistantController(catalog, persona, home, m_Ranker, m_Gemma, m_View, m_Music, m_Speech, info, m_Timing);
+            m_Controller = new AssistantController(catalog, persona, home, m_Ranker, m_Gemma, m_View, m_Music, m_Speech, info, m_Timing, llm);
             m_View.MicClicked += ToggleListen;
             m_Voice.SpeechStarted += () =>
             {

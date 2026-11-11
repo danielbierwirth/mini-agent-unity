@@ -91,11 +91,8 @@ namespace NeedleTest
         public static string NotFound(string query) => Pick($"I couldn't find an answer for \"{query}\".", $"\"{query}\"에 대한 답을 찾지 못했어요.", $"لم أجد إجابة عن \"{query}\".");
         public static string CantHandleCall(string name) => Pick($"Can't handle '{name}'.", $"'{name}'은(는) 처리할 수 없어요.", $"لا أستطيع تنفيذ '{name}'.");
 
-        /// <summary>The instruction that pins the cloud model's reply language to the selected one.</summary>
-        public static string ReplyLanguageRule => Pick(
-            "Reply ONLY in English, whatever language the user writes in.",
-            "Reply ONLY in Korean (polite 해요체), whatever language the user writes in.",
-            "Reply ONLY in Modern Standard Arabic, in Arabic script, whatever language the user writes in.");
+        /// <summary>The instruction that pins the language model's reply language to the selected one (shared with VoiceAgentDemo).</summary>
+        public static string ReplyLanguageRule => VoiceAgent.Info.AnswerWriter.LanguageRule(AppLanguage.Current);
 
         public static string InputPlaceholder => Pick(
             "Type a command (e.g., turn on the living room light)",
