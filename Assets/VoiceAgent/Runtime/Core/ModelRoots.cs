@@ -33,10 +33,11 @@ namespace VoiceAgent
         public static string Gemma => Package(GemmaPackage);
         /// <summary>The trained Decision AI head graph (VoiceAgent/Train Command Head).</summary>
         /// <summary>
-        /// The Whisper size used for Arabic speech: "tiny", "base" or "small". base recovered more Arabic commands than
-        /// tiny at ~1.6x its time, and as many as small at a third of small's time (Docs/stt-roundtrip.md).
+        /// The Whisper size used for Arabic speech: "tiny", "base" or "small". With the command-word prompt
+        /// (SpeechLanguage.ArabicPrompt) small got every Arabic test command, base 4-5 of 5 at a third of the time
+        /// (Docs/stt-roundtrip.md).
         /// </summary>
-        public static string WhisperSize = "base";
+        public static string WhisperSize = "small";
         /// <summary>The selected Whisper's folder (VoiceAgent ▸ Speech ▸ Download Whisper … writes it; not in git).</summary>
         public static string Whisper => WhisperFor(WhisperSize);
         public static string WhisperFor(string size) => Path.Combine(Application.isEditor ? Application.streamingAssetsPath : RuntimeRoot, WhisperFolder, size);

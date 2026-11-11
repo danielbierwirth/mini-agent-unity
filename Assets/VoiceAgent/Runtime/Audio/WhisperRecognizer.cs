@@ -24,7 +24,9 @@ namespace VoiceAgent
         public const int SampleRate = 16000;
         public const string SpectrogramFile = "logmel_spectrogram.sentis", EncoderFile = "encoder.sentis", DecoderFile = "decoder.sentis", VocabFile = "vocab.json";
         const int MaxSamples = 30 * SampleRate, MaxTokens = 120, VocabSize = 51865;
-        const int EndOfText = 50257, StartOfTranscript = 50258, Transcribe = 50359, NoTimestamps = 50363;
+        const int EndOfText = 50257, StartOfTranscript = 50258, Transcribe = 50359, StartOfPrev = 50361, NoTimestamps = 50363;
+        /// <summary>Whisper keeps at most this many "previous text" tokens (half its 448-token context).</summary>
+        const int MaxPromptTokens = 223;
 
         /// <summary>Whisper's language tokens follow &lt;|startoftranscript|&gt; in this order (en = 50259).</summary>
         static readonly string[] s_Languages = { "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar" };
@@ -33,6 +35,9 @@ namespace VoiceAgent
         Worker m_Spectrogram, m_Encoder, m_Decoder;
         string[] m_Tokens;
         readonly Dictionary<char, byte> m_ByteOf = new();
+        readonly char[] m_CharOf = new char[256];
+        Dictionary<string, int> m_Ids;
+        int m_LongestPiece;
         bool m_Busy;
 
         public bool IsLoaded => m_Decoder != null;
@@ -50,8 +55,16 @@ namespace VoiceAgent
             if (!Exists(root)) throw new FileNotFoundException($"Whisper models are missing in {root}; run VoiceAgent ▸ Speech ▸ Download Whisper …");
             var vocab = JsonConvert.DeserializeObject<Dictionary<string, int>>(File.ReadAllText(Path.Combine(root, VocabFile), Encoding.UTF8));
             m_Tokens = new string[VocabSize];
+            m_Ids = new Dictionary<string, int>(vocab.Count);
+            m_LongestPiece = 0;
             foreach (var (piece, id) in vocab)
-                if (id >= 0 && id < VocabSize) m_Tokens[id] = piece;
+                if (id >= 0 && id < EndOfText)
+                {
+                    m_Tokens[id] = piece;
+                    m_Ids[piece] = id;
+                    m_LongestPiece = Math.Max(m_LongestPiece, piece.Length);
+                }
+                else if (id >= 0 && id < VocabSize) m_Tokens[id] = piece;
             BuildByteDecoder();
 
             m_Spectrogram = new Worker(ModelLoader.Load(Path.Combine(root, SpectrogramFile)), m_Backend);
@@ -71,8 +84,12 @@ namespace VoiceAgent
             return graph.Compile();
         }
 
-        /// <summary>Transcribes 16 kHz mono audio (up to 30 s) in <paramref name="language"/> ("ar", "en", "ko", …).</summary>
-        public async Awaitable<string> TranscribeAsync(float[] audio, string language, CancellationToken cancel = default)
+        /// <summary>
+        /// Transcribes 16 kHz mono audio (up to 30 s) in <paramref name="language"/> ("ar", "en", "ko", …).
+        /// <paramref name="prompt"/> is Whisper's "previous text" (&lt;|startofprev|&gt;): words in it are spelled as written
+        /// and heard more readily, so passing the expected vocabulary steers short commands toward it.
+        /// </summary>
+        public async Awaitable<string> TranscribeAsync(float[] audio, string language, CancellationToken cancel = default, string prompt = null)
         {
             if (!IsLoaded) throw new InvalidOperationException("Load the Whisper models first.");
             var lang = Array.IndexOf(s_Languages, language);
@@ -89,9 +106,16 @@ namespace VoiceAgent
                 m_Encoder.Schedule(m_Spectrogram.PeekOutput() as Tensor<float>);
                 var encoded = m_Encoder.PeekOutput() as Tensor<float>;
 
-                var tokens = new List<int> { StartOfTranscript, 50259 + lang, Transcribe, NoTimestamps };
-                var prompt = tokens.Count;
-                while (tokens.Count < MaxTokens)
+                var tokens = new List<int>();
+                if (!string.IsNullOrWhiteSpace(prompt))
+                {
+                    var previous = Encode(" " + prompt.Trim());
+                    tokens.Add(StartOfPrev);
+                    tokens.AddRange(previous.Count > MaxPromptTokens ? previous.GetRange(previous.Count - MaxPromptTokens, MaxPromptTokens) : previous);
+                }
+                tokens.AddRange(new[] { StartOfTranscript, 50259 + lang, Transcribe, NoTimestamps });
+                var start = tokens.Count;
+                while (tokens.Count - start < MaxTokens)
                 {
                     cancel.ThrowIfCancellationRequested();
                     using var ids = new Tensor<int>(new TensorShape(1, tokens.Count), tokens.ToArray());
@@ -103,9 +127,9 @@ namespace VoiceAgent
                     if (token == EndOfText || token >= EndOfText) break;
                     tokens.Add(token);
                     // Greedy decoding can loop on one token; four in a row ends the utterance.
-                    if (tokens.Count - prompt >= 4 && tokens[^1] == tokens[^2] && tokens[^2] == tokens[^3] && tokens[^3] == tokens[^4]) break;
+                    if (tokens.Count - start >= 4 && tokens[^1] == tokens[^2] && tokens[^2] == tokens[^3] && tokens[^3] == tokens[^4]) break;
                 }
-                return Decode(tokens, prompt).Trim();
+                return Decode(tokens, start).Trim();
             }
             finally
             {
@@ -128,6 +152,31 @@ namespace VoiceAgent
             return Encoding.UTF8.GetString(bytes.ToArray());
         }
 
+        /// <summary>
+        /// Text → token ids for the prompt, by longest match against the vocabulary within each space-led word (as GPT-2
+        /// pre-tokenizes). Without merges.txt this isn't exactly Whisper's BPE split, but every piece is a real token and
+        /// the bytes are the same, which is all a prompt needs.
+        /// </summary>
+        List<int> Encode(string text)
+        {
+            var mapped = new StringBuilder();
+            foreach (var b in Encoding.UTF8.GetBytes(text)) mapped.Append(m_CharOf[b]);
+            var s = mapped.ToString();
+            var space = m_CharOf[' '];
+            var ids = new List<int>();
+            for (var i = 0; i < s.Length;)
+            {
+                var wordEnd = s.IndexOf(space, i + 1);
+                if (wordEnd < 0) wordEnd = s.Length;
+                var length = Math.Min(m_LongestPiece, wordEnd - i);
+                for (; length > 1 && !m_Ids.ContainsKey(s.Substring(i, length)); length--) { }
+                // Every single byte character is in the vocabulary, so a length of 1 always matches.
+                if (m_Ids.TryGetValue(s.Substring(i, length), out var id)) ids.Add(id);
+                i += length;
+            }
+            return ids;
+        }
+
         /// <summary>GPT-2's bytes_to_unicode, inverted: printable bytes map to themselves, the rest to 256 + n.</summary>
         void BuildByteDecoder()
         {
@@ -138,7 +187,10 @@ namespace VoiceAgent
             for (var b = '®'; b <= 'ÿ'; b++) printable.Add(b);
             var n = 0;
             for (var b = 0; b < 256; b++)
-                m_ByteOf[printable.Contains(b) ? (char)b : (char)(256 + n++)] = (byte)b;
+            {
+                m_CharOf[b] = printable.Contains(b) ? (char)b : (char)(256 + n++);
+                m_ByteOf[m_CharOf[b]] = (byte)b;
+            }
         }
 
         public void Dispose()

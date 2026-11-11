@@ -64,4 +64,18 @@ Clips are 1.3–2.5 s long. Times are per utterance after warm-up; Whisper re-ru
 
 1. Install the models: **VoiceAgent ▸ Speech ▸ Download Whisper Tiny / Base / Small** (written to `Assets/StreamingAssets/Whisper/<size>`, not in git).
 2. Open `VoiceAgentDemo`, enter Play mode, then synthesize each phrase with `SpeechOutput.SynthesizeClip`, transcribe it with `WhisperRecognizer` (`ModelRoots.WhisperFor(size)`) or SenseVoice, and score it with `AssistantController.ShowChips`. `VoiceAgentDemoScene.SpeakAndListen(text)` runs the same round trip for the selected language through the app's own voice path.
-3. Arabic uses the size in `ModelRoots.WhisperSize` (default `"base"`, chosen from these results).
+3. Arabic uses the size in `ModelRoots.WhisperSize` (default `"small"` since the vocabulary prompt, see below).
+
+## Arabic with a vocabulary prompt (2026-11-11)
+
+Whisper now gets `SpeechLanguage.ArabicPrompt` (the command words, spelled as `ArabicCommands` expects) as its "previous text" (`<|startofprev|>`). Same five phrases, plus six new phrasings and a chat line that should stay chat. A phrase passes when `ArabicCommands.ToEnglish` gives the expected command. Supertonic doesn't produce the same audio twice, so the table shows the range over three runs.
+
+| Model | Prompt | Original 5 | New 6 | Avg. time |
+|---|---|---|---|---|
+| whisper-base | off | 1–3/5 | 3/6 | ~255 ms |
+| whisper-base | on | 4–5/5 | 3–4/6 | ~375 ms |
+| whisper-small | off | 3–4/5 | 4/6 | ~700 ms |
+| whisper-small | on | **5/5** | 4–5/6 | ~1100–1300 ms |
+
+* With the prompt, the transcripts mostly match the source text word for word (شغّل التلفاز, أوقف المكنسة, أطفئ نور غرفة النوم). Both models wrote قلل الصوت as "قل الصوت" and أوقف الروبوت as "الربوت"; `ArabicCommands` now reads both (only the last run, small 5/6, includes that fix). Whisper-small with the prompt is now the default.
+* **Prompt hallucination:** on silence or noise a prompted Whisper repeats prompt clauses ("شغّل الموسيقى، شغّل الموسيقى، …"). Once, base also spliced prompt clauses into real speech. `SpeechLanguage.IsHallucination` drops a transcript when a clause repeats, when it copies two or more prompt clauses verbatim, or when it holds more text than the audio's length allows. One case still gets through: base produced a single "شغّل الموسيقى." from 2 s of faint white noise. In the app, Silero VAD only passes speech to Whisper, so this test (raw noise sent straight to Whisper) is harsher than live use.

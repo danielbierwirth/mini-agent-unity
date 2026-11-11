@@ -28,7 +28,8 @@ namespace VoiceAgent
         static readonly string[] LightWords = { "ضو", "اضوا", "نور", "انوار", "مصباح", "مصابيح", "اناره", "اضاه", "لمبه", "لمبات" };
         static readonly string[] TvWords = { "تلفاز", "تلفزيون", "تلفزه", "تليفزيون", "تلفيزيون", "tv" };
         static readonly string[] ComputerWords = { "كمبيوتر", "كومبيوتر", "حاسوب", "حاسب", "لابتوب", "pc" };
-        static readonly string[] VacuumWords = { "مكنس", "روبوت", "تنظيف", "نظف" };
+        // "ربوت": Whisper writes روبوت without its و ("أوقف الربوت").
+        static readonly string[] VacuumWords = { "مكنس", "روبوت", "ربوت", "تنظيف", "نظف" };
         static readonly string[] MusicWords = { "موسيق", "اغني", "اغان", "اغاني" };
         static readonly string[] VolumeWords = { "صوت", "الصوت" };
 
@@ -159,6 +160,9 @@ namespace VoiceAgent
 
             if (Any(words, VolumeWords) && !Any(words, MusicWords))
             {
+                // Whisper hears "قلل الصوت" (lower the volume) as "قل الصوت" ("say the volume"), which means nothing else.
+                // Only the whole word counts, next to a volume word: as a cue, قل would also start قلب, قليل, …
+                if (!up && words.Contains("قل")) down = true;
                 if (value != null && !up && !down) return $"set the volume to {value}";
                 if (up && !down) return "turn the volume up";
                 if (down && !up) return "turn the volume down";
