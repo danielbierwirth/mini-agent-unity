@@ -69,6 +69,8 @@ public class HomeAgentConnector : MonoBehaviour
     // retrieval, and its cloud-LLM synthesis) appends its own labelled entry, so the
     // status reads e.g. "web_search{q} 1600ms + fetch 240ms + cloud_llm 900ms".
     readonly List<string> m_NetSegs = new List<string>();
+    // An Arabic question the rules sent to web_search: the search runs on its topic ("لبنان"), the cloud answers this.
+    string m_ArabicQuestion;
 
     public bool IsReady => m_Ready;
     public bool IsBusy => m_Busy;
@@ -187,8 +189,18 @@ public class HomeAgentConnector : MonoBehaviour
         string raw = null;
         // Arabic the rewrite can't read is conversation: the model never saw Arabic and would invent calls for it.
         bool arabicChat = modelText == user && ArabicText.ContainsArabic(user);
-        var local = arabicChat ? null : LocalIntents.Match(modelText);
+        // An Arabic question the rules recognised as a search: the call is built here with the topic in its original
+        // spelling, since FunctionGemma garbles Arabic it has to copy ("لبنان" → "linger", "عاصمة فرنسا" → "اصمه فرنسا").
+        bool arabicSearch = modelText != user && modelText.StartsWith(ArabicCommands.SearchPrefix, System.StringComparison.Ordinal);
+        m_ArabicQuestion = arabicSearch ? user : null;
+        var local = arabicChat || arabicSearch ? null : LocalIntents.Match(modelText);
         if (arabicChat) SessionLog("AR    no command, chat");
+        else if (arabicSearch)
+        {
+            var topic = ArabicCommands.SearchTopic(user);
+            raw = $"call:web_search{{query:<escape>{topic}<escape>}}";
+            SessionLog($"AR    search {topic}");
+        }
         else if (local != null) { raw = $"call:{local}{{}}"; SessionLog($"LOCAL {local}"); }
         else yield return _agent.GenerateCallRoutine(modelText, r => raw = r);
         long agentMs = sw.ElapsedMilliseconds;
@@ -442,9 +454,11 @@ public class HomeAgentConnector : MonoBehaviour
                         "You answer the user's question using the web search results provided. " +
                         "Ground your answer in them; if they are insufficient, answer from your own " +
                         "knowledge and note that briefly. " + AgentReplies.ReplyLanguageRule + " One or two sentences.";
+                    // An Arabic question searched by its topic is answered as asked ("أين يقع لبنان؟", not "لبنان").
+                    string question = m_ArabicQuestion ?? query;
                     string prompt = string.IsNullOrEmpty(context)
-                        ? $"Question: {query}\n\n(No search results were found.)"
-                        : $"Question: {query}\n\nWeb search results:\n{context}";
+                        ? $"Question: {question}\n\n(No search results were found.)"
+                        : $"Question: {question}\n\nWeb search results:\n{context}";
                     var lsw = System.Diagnostics.Stopwatch.StartNew(); string ans = null;
                     yield return AgentCloudClient.Complete(sys, prompt, _cloudEndpoint, _cloudModel, (a, _) => ans = a, _cloudReasoningEffort);
                     lsw.Stop(); m_NetSegs.Add($"cloud_llm {lsw.ElapsedMilliseconds}ms");
