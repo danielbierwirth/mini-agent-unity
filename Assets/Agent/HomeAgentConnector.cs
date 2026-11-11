@@ -570,7 +570,12 @@ public class HomeAgentConnector : MonoBehaviour
         }
     }
 
-    void OnLanguageChanged(Lang lang) => ApplyLanguageLabels();
+    void OnLanguageChanged(Lang lang)
+    {
+        ApplyLanguageLabels();
+        // Text typed in the previous language would be sent in the wrong one.
+        if (_input != null) _input.text = string.Empty;
+    }
 
     void OnDestroy() => AppLanguage.Changed -= OnLanguageChanged;
 

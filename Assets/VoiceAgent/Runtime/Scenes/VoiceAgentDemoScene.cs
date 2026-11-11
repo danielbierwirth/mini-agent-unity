@@ -30,6 +30,7 @@ namespace VoiceAgent.Scenes
         [SerializeField] string m_LlmReasoningEffort = LlmClient.DefaultReasoningEffort;
 
         AssistantController m_Controller;
+        Persona m_Persona;
         VoiceInput m_Voice;
         Gemma3Model m_Gemma;
         DecisionAIRanker m_Ranker;
@@ -122,6 +123,16 @@ namespace VoiceAgent.Scenes
             m_View.SetStatus(string.Empty);
             UnityEngine.Debug.Log($"[VoiceAgent] ready in {clock.Elapsed.TotalSeconds:F1} s");
             m_View.AddMessage(persona.Greeting(AppLanguage.Current), false);
+            m_Persona = persona;
+            AppLanguage.Changed += OnLanguageChanged;
+        }
+
+        // A new language starts a new chat: the old reply stops speaking and the greeting is shown in the new language.
+        void OnLanguageChanged(Lang lang)
+        {
+            m_Speech.Stop();
+            m_View.ClearMessages();
+            m_View.AddMessage(m_Persona.Greeting(lang), false);
         }
 
         // ---- test hooks (play mode, e.g. via script eval): the same paths typed text and a spoken utterance take ----
@@ -217,6 +228,7 @@ namespace VoiceAgent.Scenes
 
         void OnDestroy()
         {
+            AppLanguage.Changed -= OnLanguageChanged;
             m_Voice?.Dispose();
             m_Ranker?.Dispose();
             m_Gemma?.Dispose();

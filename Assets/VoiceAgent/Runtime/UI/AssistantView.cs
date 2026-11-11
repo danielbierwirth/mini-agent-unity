@@ -38,6 +38,7 @@ namespace VoiceAgent.UI
         MicState m_Mic = MicState.Off;
         bool m_ShowingBusyNotice;
         float m_Level;
+        readonly List<MessageView> m_Messages = new();
 
         public int MaxChips => m_Chips.Length;
         public RectTransform Content => m_Content;
@@ -51,7 +52,14 @@ namespace VoiceAgent.UI
             foreach (var chip in m_Chips) chip.Clicked += c => ChipClicked?.Invoke(c);
             SetChips(null);
             SetMicState(MicState.Off);
+            AppLanguage.Changed += OnLanguageChanged;
         }
+
+        void OnDestroy() => AppLanguage.Changed -= OnLanguageChanged;
+
+        // Text typed in the previous language would be sent in the wrong one. Setting .text (not without notify) also
+        // re-ranks the suggestion chips for the empty field.
+        void OnLanguageChanged(Lang lang) => m_Input.text = string.Empty;
 
         void OnSubmit(string value)
         {
@@ -90,14 +98,25 @@ namespace VoiceAgent.UI
             var message = Instantiate(fromUser ? m_UserTemplate : m_AssistantTemplate, m_Log);
             message.gameObject.SetActive(true);
             message.SetText(text);
+            m_Messages.Add(message);
             ScrollToEnd();
             return message;
         }
 
         public void UpdateMessage(MessageView message, string text)
         {
+            // A turn still streaming into a bubble that ClearMessages removed.
+            if (message == null) return;
             message.SetText(text);
             ScrollToEnd();
+        }
+
+        /// <summary>Removes every chat bubble (the templates stay).</summary>
+        public void ClearMessages()
+        {
+            foreach (var message in m_Messages)
+                if (message != null) Destroy(message.gameObject);
+            m_Messages.Clear();
         }
 
         void ScrollToEnd()
