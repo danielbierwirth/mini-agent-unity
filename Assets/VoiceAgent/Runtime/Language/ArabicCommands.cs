@@ -178,8 +178,8 @@ namespace VoiceAgent
                 if (words.Any(w => w is "كم" or "ما")) return "what is the volume";
                 return value != null ? $"set the volume to {value}" : null;
             }
-            if (Any(words, TvWords)) return off ? "turn off the tv" : on ? "turn on the tv" : null;
-            if (Any(words, ComputerWords)) return off ? "turn off the computer" : on ? "turn on the computer" : null;
+            if (Any(words, TvWords)) return off ? $"turn off the {roomPart}tv" : on ? $"turn on the {roomPart}tv" : null;
+            if (Any(words, ComputerWords)) return off ? $"turn off the {roomPart}computer" : on ? $"turn on the {roomPart}computer" : null;
             if (Any(words, MusicWords))
             {
                 if (off) return "stop the music";

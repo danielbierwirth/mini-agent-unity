@@ -159,7 +159,7 @@ Assets/
 │  ├─ AgentInfoApis.cs            # weather / time / location backends
 │  ├─ RuntimeNavMeshBake.cs       # bakes the NavMesh at startup
 │  ├─ TigerSpeechBubble.cs        # speech bubble above Tiger's head
-│  └─ MiniAgentTestRunner.cs      # scripted command list, started/stopped with a button
+│  └─ MiniAgentTestRunner.cs      # scripted command list (English, Korean or Arabic, per the selected language), started/stopped with a button
 ├─ Voice/
 │  └─ VoiceCommandInput.cs        # Mic button: speech → transcript → HomeAgentConnector
 ├─ Scripts/

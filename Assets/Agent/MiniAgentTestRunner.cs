@@ -6,8 +6,8 @@ using UnityEngine.UI;
 
 /// <summary>
 /// Drives a scripted list of commands through <see cref="HomeAgentConnector"/>, one at
-/// a time. Put this on a "Test" GameObject in the scene, fill the <see cref="_commands"/>
-/// list in the Inspector (executed top to bottom), and set the timings. When the scene
+/// a time, in the selected language (English, Korean or Arabic list). Put this on a "Test" GameObject in the scene,
+/// fill the lists in the Inspector (executed top to bottom), and set the timings. When the scene
 /// starts it waits <see cref="_startDelay"/> seconds, then submits each command, waiting
 /// <see cref="_interval"/> seconds between them (and for the agent to finish each turn).
 /// The agent logs every turn (incl. the harvest log), so progress is visible there.
@@ -32,14 +32,35 @@ public class MiniAgentTestRunner : MonoBehaviour
     [Tooltip("Optional button that starts / stops the command list.")]
     [SerializeField] private Button _toggleButton;
 
-    [Header("Commands (run in order, top to bottom)")]
+    // One list per language, run in the selected language (the EN / 한국어 / العربية toggle). The lists hold the same
+    // commands so a run looks the same in every language; _commands keeps its name so the scene's English list loads.
+    [Header("Commands (run in order, top to bottom, in the selected language)")]
+    [Tooltip("English commands.")]
     [SerializeField]
     private List<string> _commands = new List<string>
     {
-        "마루 불 켜줘",
-        "부엌 불 켜줘",
+        "Turn on the living room light",
+        "Turn on the kitchen light blue",
+        "Turn on the TV",
+        "Turn on the living room speaker",
+        "Set volume to 30%",
+        "Play rock music",
+        "Run the vacuum cleaner",
+        "Turn off the living room light, and turn off the living room TV",
+        "How's the weather in Seoul?",
+        "What time is it right now?",
+        "Turn on the bedroom computer",
+        "How are you feeling today?"
+    };
+
+    [Tooltip("Korean commands.")]
+    [SerializeField]
+    private List<string> _commandsKo = new List<string>
+    {
+        "거실 불 켜줘",
+        "부엌 불 파란색으로 켜줘",
         "티비 켜줘",
-        "마루 스피커 켜줘",
+        "거실 스피커 켜줘",
         "볼륨 30으로 해줘",
         "락 틀어줘",
         "청소기 돌려줘",
@@ -49,6 +70,34 @@ public class MiniAgentTestRunner : MonoBehaviour
         "안방 컴퓨터 켜줘",
         "오늘 기분 어때?"
     };
+
+    [Tooltip("Arabic commands.")]
+    [SerializeField]
+    private List<string> _commandsAr = new List<string>
+    {
+        "شغّل ضوء غرفة المعيشة",
+        "شغّل ضوء المطبخ باللون الأزرق",
+        "شغّل التلفاز",
+        "شغّل الموسيقى في غرفة المعيشة",
+        "اضبط الصوت على 30",
+        "شغّل موسيقى الروك",
+        "شغّل المكنسة",
+        "أطفئ ضوء غرفة المعيشة وأطفئ التلفاز في غرفة المعيشة",
+        "كيف الطقس في سيول؟",
+        "كم الساعة الآن؟",
+        "شغّل الكمبيوتر في غرفة النوم",
+        "كيف حالك اليوم؟"
+    };
+
+    /// <summary>The command list for the selected language (English when that list is empty).</summary>
+    List<string> Commands
+    {
+        get
+        {
+            var list = VoiceAgent.AppLanguage.Current switch { VoiceAgent.Lang.Ko => _commandsKo, VoiceAgent.Lang.Ar => _commandsAr, _ => _commands };
+            return list != null && list.Count > 0 ? list : _commands;
+        }
+    }
 
     Coroutine m_Run;
     TMP_Text m_Label;
@@ -122,13 +171,16 @@ public class MiniAgentTestRunner : MonoBehaviour
         if (conn == null) conn = FindAnyObjectByType<HomeAgentConnector>();
         if (conn == null) { Debug.LogWarning("[TESTRUNNER] no HomeAgentConnector in scene"); yield break; }
 
-        for (int i = 0; i < _commands.Count; i++)
+        // The list is read again each step, so switching the language mid-run continues in the new language.
+        for (int i = 0; i < Commands.Count; i++)
         {
-            var cmd = _commands[i];
+            while (conn.IsBusy) yield return null;
+            var commands = Commands;
+            if (i >= commands.Count) break;
+            var cmd = commands[i];
             if (string.IsNullOrWhiteSpace(cmd)) continue;
 
-            while (conn.IsBusy) yield return null;
-            Debug.Log($"[TESTRUNNER] {i + 1}/{_commands.Count}  {cmd}");
+            Debug.Log($"[TESTRUNNER] {i + 1}/{commands.Count}  {cmd}");
             conn.Submit(cmd);
 
             // let the turn start, then hold for the interval
