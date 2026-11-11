@@ -19,7 +19,7 @@ public class VoiceCommandInput : MonoBehaviour
     [Tooltip("Shows partial transcripts while you talk (the agent's command field).")]
     [SerializeField] private TMP_InputField _input;
     [Tooltip("The speech-to-text model for Arabic (VoiceAgent ▸ Speech installs each). The dialect model is whisper-small fine-tuned on 13 Arabic dialects.")]
-    [SerializeField] private ArabicWhisper _arabicSpeech = ArabicWhisper.Small;
+    [SerializeField] private ArabicWhisper _arabicSpeech = ArabicWhisper.SmallDialect;
 
     [Header("Mic button colors")]
     [SerializeField] private Color _idleColor = new(0.20f, 0.55f, 0.95f);

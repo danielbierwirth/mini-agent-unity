@@ -92,10 +92,16 @@ namespace VoiceAgent
         void LoadWhisper()
         {
             if (m_Whisper != null || m_Disposed) return;
-            if (!WhisperRecognizer.Exists(ModelRoots.Whisper))
+            var installed = ModelRoots.InstalledWhisper();
+            if (installed == null)
             {
                 Debug.LogWarning($"[Voice] Arabic speech needs Whisper-{ModelRoots.WhisperSize} in {ModelRoots.Whisper}: install it from the VoiceAgent ▸ Speech menu");
                 return;
+            }
+            if (installed != ModelRoots.WhisperSize)
+            {
+                Debug.LogWarning($"[Voice] Whisper-{ModelRoots.WhisperSize} isn't installed (VoiceAgent ▸ Speech menu); using Whisper-{installed} for Arabic.");
+                ModelRoots.WhisperSize = installed;
             }
             try
             {

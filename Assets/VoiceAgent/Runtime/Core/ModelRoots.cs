@@ -33,14 +33,23 @@ namespace VoiceAgent
         public static string Gemma => Package(GemmaPackage);
         /// <summary>The trained Decision AI head graph (VoiceAgent/Train Command Head).</summary>
         /// <summary>
-        /// The Whisper model used for Arabic speech, by folder: "tiny", "base", "small", or "small-dialect" (whisper-small
-        /// fine-tuned on 13 Arabic dialects). With the command-word prompt (SpeechLanguage.ArabicPrompt) small got every
-        /// Arabic test command, base 4-5 of 5 at a third of the time (Docs/stt-roundtrip.md). The scenes set it from their
-        /// Inspector option (<see cref="ArabicWhisper"/>) before creating <see cref="VoiceInput"/>.
+        /// The Whisper model used for Arabic speech, by folder: "small-dialect" (the default: whisper-small fine-tuned on
+        /// 13 Arabic dialects), "small", "base" or "tiny". With the command-word prompt (SpeechLanguage.ArabicPrompt) the
+        /// dialect model transcribed closest to what was said, at stock small's speed (Docs/stt-roundtrip.md). The scenes
+        /// set it from their Inspector option (<see cref="ArabicWhisper"/>) before creating <see cref="VoiceInput"/>; when
+        /// it isn't installed, VoiceInput falls back to the largest one that is (<see cref="InstalledWhisper"/>).
         /// </summary>
-        public static string WhisperSize = "small";
+        public static string WhisperSize = "small-dialect";
         /// <summary>The selected Whisper's folder (VoiceAgent ▸ Speech ▸ Download Whisper … writes it; not in git).</summary>
         public static string Whisper => WhisperFor(WhisperSize);
+        /// <summary>The selected Whisper if it is installed, else the largest installed one (small, base, tiny), else null.</summary>
+        public static string InstalledWhisper()
+        {
+            foreach (var size in new[] { WhisperSize, "small-dialect", "small", "base", "tiny" })
+                if (WhisperRecognizer.Exists(WhisperFor(size))) return size;
+            return null;
+        }
+
         public static string WhisperFolderOf(ArabicWhisper model) => model switch
         {
             ArabicWhisper.Tiny => "tiny",

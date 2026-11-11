@@ -21,7 +21,7 @@ namespace VoiceAgent.Scenes
         [SerializeField] SpeechOutput m_Speech;
         [SerializeField] TimingPanel m_Timing;
         [Tooltip("The speech-to-text model for Arabic (VoiceAgent ▸ Speech installs each). The dialect model is whisper-small fine-tuned on 13 Arabic dialects.")]
-        [SerializeField] ArabicWhisper m_ArabicSpeech = ArabicWhisper.Small;
+        [SerializeField] ArabicWhisper m_ArabicSpeech = ArabicWhisper.SmallDialect;
 
         [Header("Language model (OpenAI-compatible chat completions; empty endpoint = on-device Gemma3 only)")]
         [SerializeField] string m_LlmEndpoint = LlmClient.DefaultEndpoint;

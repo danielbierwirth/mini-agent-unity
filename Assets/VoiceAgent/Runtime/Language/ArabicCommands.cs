@@ -22,10 +22,13 @@ namespace VoiceAgent
         /// <summary>How a web search rewrite starts ("search the web for لبنان").</summary>
         public const string SearchPrefix = "search the web for";
 
-        static readonly string[] OnVerbs = { "شغل", "تشغيل", "اشعل", "شعل", "ولع", "افتح", "فتح", "اضي", "انر", "نور", "ابدا", "شغلي", "دور", "ادر", "اعزف" };
-        static readonly string[] OffVerbs = { "اطفي", "اطف", "طفي", "اطفا", "اغلق", "اغلاق", "سكر", "قفل", "اقفل", "اوقف", "وقف", "ايقاف", "اسكت", "اوقفي", "طفيه" };
+        // Dialect verbs alongside the MSA ones: ولّع/شعّل/ضوّي (Levantine, Gulf, Maghrebi "light, switch on"), حطّ (Levantine,
+        // Gulf "put on": music, the TV), اسمع ("I want to listen to": بدي/عايز/ابغى اسمع موسيقى), بطّل (Levantine, Egyptian
+        // "stop"), سكّت ("silence"), هدّي/وطّي/واطي ("lower"). علّي ("raise") is handled next to a volume word only (see Clause).
+        static readonly string[] OnVerbs = { "شغل", "تشغيل", "اشعل", "شعل", "ولع", "افتح", "فتح", "اضي", "انر", "نور", "ابدا", "شغلي", "دور", "ادر", "اعزف", "ضوي", "حط", "اسمع" };
+        static readonly string[] OffVerbs = { "اطفي", "اطف", "طفي", "اطفا", "اغلق", "اغلاق", "سكر", "قفل", "اقفل", "اوقف", "وقف", "ايقاف", "اسكت", "اوقفي", "طفيه", "بطل", "سكت" };
         static readonly string[] UpVerbs = { "ارفع", "رفع", "زد", "زيد", "زود", "كبر" };
-        static readonly string[] DownVerbs = { "اخفض", "خفض", "قلل", "نزل", "وطي", "خفف", "صغر", "اهدا" };
+        static readonly string[] DownVerbs = { "اخفض", "خفض", "قلل", "نزل", "وطي", "واطي", "خفف", "صغر", "اهدا", "هدي" };
         static readonly string[] SetVerbs = { "اضبط", "ضبط", "اجعل", "خلي", "غير", "حول", "بدل", "لون" };
 
         static readonly string[] LightWords = { "ضو", "اضوا", "نور", "انوار", "مصباح", "مصابيح", "اناره", "اضاه", "لمبه", "لمبات" };
@@ -166,6 +169,9 @@ namespace VoiceAgent
                 // Whisper hears "قلل الصوت" (lower the volume) as "قل الصوت" ("say the volume"), which means nothing else.
                 // Only the whole word counts, next to a volume word: as a cue, قل would also start قلب, قليل, …
                 if (!up && words.Contains("قل")) down = true;
+                // علّي الصوت (dialect "raise the volume") normalizes to "علي", the preposition "on": it only means "raise"
+                // before a volume word with no number ("خلي الصوت على 30" sets the volume to 30).
+                if (!down && value == null && words.Any(w => w is "علي" or "عليه" || w.StartsWith("عليل", StringComparison.Ordinal))) up = true;
                 if (value != null && !up && !down) return $"set the volume to {value}";
                 if (up && !down) return "turn the volume up";
                 if (down && !up) return "turn the volume down";
@@ -196,9 +202,10 @@ namespace VoiceAgent
         {
             bool Has(string phrase) => normalized.Contains(Cue(phrase), StringComparison.Ordinal);
 
-            if (Has("من انت") || Has("من تكون") || Has("ما اسمك") || Has("عرف بنفسك") || Has("عرفني بنفسك") || Has("عرفنا بنفسك"))
+            if (Has("من انت") || Has("مين انت") || Has("من تكون") || Has("عرف بنفسك") || Has("عرفني بنفسك") || Has("عرفنا بنفسك") ||
+                (words.Contains("اسمك") && words.Any(w => TimeQuestion.Contains(w))))
                 return "who are you";
-            if (Has("اين انا") || Has("موقعي") || Has("مكاني"))
+            if (Has("اين انا") || Has("وين انا") || Has("فين انا") || Has("موقعي") || Has("مكاني"))
                 return "where am i";
             if (Any(words, new[] { "طقس", "حراره", "مطر", "امطار" }) || words.Any(w => Forms(w).Contains("جو")))
             {
@@ -206,7 +213,7 @@ namespace VoiceAgent
                 var city = Place(words);
                 return $"what's the weather{(city != null ? " in " + city : string.Empty)}{day}";
             }
-            if ((Any(words, new[] { "ساعه", "وقت" }) && words.Any(w => w is "كم" or "ما" or "ماهو" or "ماهي")) || Has("كم الساعه"))
+            if ((Any(words, new[] { "ساعه", "وقت" }) && words.Any(w => TimeQuestion.Contains(w))) || Has("كم الساعه"))
             {
                 var city = Place(words);
                 return city != null ? $"what time is it in {city}" : "what time is it";
@@ -223,6 +230,10 @@ namespace VoiceAgent
                 return $"{SearchPrefix} {Topic(words)}".TrimEnd();
             return null;
         }
+
+        /// <summary>"What"/"how much" in MSA and dialect, for "what time is it" (كم الساعة، شو الساعة، الساعة كام، قديش الساعة)
+        /// and "what's your name" (ما اسمك، شو اسمك، اسمك ايه).</summary>
+        static readonly string[] TimeQuestion = { "كم", "ما", "ماهو", "ماهي", "شو", "ايش", "كام", "قديش", "اديش", "ايه", "شنو", "واش" };
 
         /// <summary>Second-person and small-talk words: a question holding one is about Nova, not the world.</summary>
         static readonly string[] Personal =

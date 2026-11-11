@@ -117,6 +117,6 @@ Assets/StreamingAssets/Models/
 Assets/StreamingAssets/Models.meta
 Assets/StreamingAssets/voiceagent_files.txt*
 
-# Whisper for Arabic speech-to-text (small by default, ~543 MB; small-dialect optional): VoiceAgent > Speech writes it
+# Whisper for Arabic speech-to-text (small-dialect by default, ~543 MB): VoiceAgent > Speech writes it
 /[Aa]ssets/StreamingAssets/Whisper/
 /[Aa]ssets/StreamingAssets/Whisper.meta
